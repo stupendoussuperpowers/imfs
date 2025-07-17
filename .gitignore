@@ -1,0 +1,5 @@
+playground.c
+imfs_*.c
+target/
+.clang-format
+.DS_Store
