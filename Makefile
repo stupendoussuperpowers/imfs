@@ -1,3 +1,3 @@
 make:
-	cc imfs.c -o target/imfs.o
+	cc imfs.c -g -o target/imfs.o
 
