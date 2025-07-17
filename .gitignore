@@ -4,3 +4,6 @@ target/
 .clang-format
 .DS_Store
 .vscode
+*.dSYM/
+*.out
+imfs

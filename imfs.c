@@ -1,7 +1,6 @@
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <unistd.h>
 
 #include "imfs.h"
@@ -84,6 +83,18 @@ str_ncopy(char *dst, char *src, int n)
 
 	for (; i < n; i++) {
 		dst[i] = '\0';
+	}
+}
+
+void
+mem_cpy(void *dst, const void *src, size_t n)
+{
+	size_t i;
+	unsigned char *d = dst;
+	const unsigned char *s = src;
+
+	for (i = 0; i < n; i++) {
+		d[i] = s[i];
 	}
 }
 
@@ -342,7 +353,7 @@ imfs_write(int fd, const void *buf, size_t count)
 		node->size = new_size;
 	}
 
-	memcpy(node->data + g_fdtable[fd].offset, buf, count);
+	mem_cpy(node->data + g_fdtable[fd].offset, buf, count);
 	g_fdtable[fd].offset += count;
 
 	return count;
@@ -372,7 +383,7 @@ imfs_read(int fd, void *buf, size_t count)
 	size_t available = node->size - c_fd.offset;
 	size_t to_read = count < available ? count : available;
 
-	memcpy(buf, node->data + c_fd.offset, to_read);
+	mem_cpy(buf, node->data + c_fd.offset, to_read);
 	c_fd.offset += to_read;
 
 	g_fdtable[fd] = c_fd;
