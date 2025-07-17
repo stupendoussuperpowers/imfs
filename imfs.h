@@ -8,6 +8,7 @@
 #define MAX_NODE_SIZE 4096
 #define MAX_FDS		  1024
 #define MAX_NODES	  1024
+#define MAX_DEPTH	10
 
 typedef enum {
 	M_REG,
@@ -45,6 +46,7 @@ ssize_t imfs_read(int fd, void *buf, size_t count);
 ssize_t imfs_write(int fd, const void *buf, size_t count);
 int imfs_close(int fd);
 int imfs_mkdir(const char *path, mode_t mode);
+int imfs_mkdirat(int fd, const char *path, mode_t mode);
 int imfs_rmdir(const char *path);
 int imfs_unlink(const char *path);
 off_t imfs_lseek(int fd, off_t offset, int whence);

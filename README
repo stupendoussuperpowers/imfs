@@ -1,2 +1,4 @@
 ## In Memory File System
 
+Emulate a POSIX-compliant FS interface with nodes stored in memory. 
+

@@ -36,7 +36,7 @@ str_rchr(const char *s, const char c)
 }
 
 void
-split_path(const char *path, int *count, char namecomp[10][256])
+split_path(const char *path, int *count, char namecomp[MAX_DEPTH][MAX_NODE_NAME])
 {
 	*count = 0;
 
@@ -172,7 +172,7 @@ imfs_allocate_fd(Node *node)
 }
 
 Node *
-imfs_find_node_namecomp(int dirfd, const char namecomp[10][256], int count)
+imfs_find_node_namecomp(int dirfd, const char namecomp[MAX_DEPTH][MAX_NODE_NAME], int count)
 {
 	if (count == 0)
 		return g_root_node;
@@ -213,7 +213,7 @@ imfs_find_node(int dirfd, const char *path)
 		return g_root_node;
 
 	int count;
-	char namecomps[10][256];
+	char namecomps[MAX_DEPTH][MAX_NODE_NAME];
 
 	split_path(path, &count, namecomps);
 
@@ -232,8 +232,9 @@ add_child(Node *parent, Node *node)
 	if (!new_children)
 		return -1;
 
+	new_children[parent->count].node = node;
+
 	parent->children = new_children;
-	parent->children[parent->count].node = node;
 
 	str_ncopy(parent->children[parent->count].name, node->name, MAX_NODE_NAME - 1);
 	parent->count = new_count;
@@ -269,7 +270,7 @@ imfs_openat(int dirfd, const char *path, int flags, mode_t mode)
 		}
 
 		int count;
-		char namecomp[10][256];
+		char namecomp[MAX_DEPTH][MAX_NODE_NAME];
 
 		split_path(path, &count, namecomp);
 
@@ -397,14 +398,41 @@ imfs_read(int fd, void *buf, size_t count)
 }
 
 int
-imfs_mkdir(const char *path, mode_t mode)
+imfs_mkdirat(int fd, const char *path, mode_t mode)
 {
 	if (!path) {
 		errno = EINVAL;
 		return -1;
 	}
 
+	Node *parent;
+
+	char namecomp[MAX_DEPTH][MAX_NODE_NAME];
+	int count;
+
+	split_path(path, &count, namecomp);
+	char *filename = namecomp[count - 1];
+
+	parent = imfs_find_node_namecomp(fd, namecomp, count - 1);
+
+	Node *node = imfs_create_node(filename, M_DIR);
+	if (!node) {
+		return -1;
+	}
+
+	if (add_child(parent, node) != 0) {
+		node->in_use = 0;
+		errno = ENOMEM;
+		return -1;
+	}
+
 	return 0;
+}
+
+int
+imfs_mkdir(const char *path, mode_t mode)
+{
+	return imfs_mkdirat(AT_FDCWD, path, mode);
 }
 
 //
@@ -441,8 +469,16 @@ main()
 	int fdat = openat(fd, "random/randfile.txt", O_RDONLY, 0);
 	printf("fdat: %d\n", fdat);
 
-	close(fdat);
-	close(fd);
+	imfs_close(fdat);
+	imfs_close(fd);
+
+	printf("[mkdir]\n");
+	int mkd = imfs_mkdir("/folder", 0);
+	mkd = imfs_mkdir("/folder/folder_2", 0);
+
+	fd = imfs_open("/folder/folder_2/file_3.txt", O_CREAT | O_WRONLY, 0);
+	printf("fd: %d\n", fd);
+	imfs_close(fd);
 
 	return 0;
 }
