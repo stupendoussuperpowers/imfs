@@ -37,11 +37,11 @@ struct FileDesc {
 	int stat;
 	Node *node;
 	int offset;
-	int is_prestat;
 };
 
 // POSIX-style function declarations
 int imfs_open(const char *path, int flags, mode_t mode);
+int imfs_openat(int dirfd, const char *path, int flags, mode_t mode);
 ssize_t imfs_read(int fd, void *buf, size_t count);
 ssize_t imfs_write(int fd, const void *buf, size_t count);
 int imfs_close(int fd);
@@ -57,7 +57,7 @@ int imfs_load_file(const char *disk_path, const char *imfs_path);
 int imfs_dump_file(const char *imfs_path, const char *disk_path);
 
 // Internal helper functions
-Node *imfs_find_node(const char *path);
+Node *imfs_find_node(int dirfd, const char *path);
 Node *imfs_create_node(const char *name, NodeType type);
 int imfs_allocate_fd(Node *node);
 void imfs_free_fd(int fd);
