@@ -178,10 +178,10 @@ imfs_find_node_namecomp(int dirfd, const char namecomp[10][256], int count)
 		return g_root_node;
 
 	Node *current;
-	if (dirfd != -1)
-		current = g_fdtable[dirfd].node; // g_root_node;
-	else
+	if (dirfd == AT_FDCWD)
 		current = g_root_node;
+	else
+		current = g_fdtable[dirfd].node;
 
 	for (int i = 0; i < count && current; i++) {
 		Node *found = NULL;
@@ -254,6 +254,11 @@ imfs_openat(int dirfd, const char *path, int flags, mode_t mode)
 		return -1;
 	}
 
+	if (dirfd == -1) {
+		errno = EBADF;
+		return -1;
+	}
+
 	Node *node = imfs_find_node(dirfd, path);
 
 	// New File
@@ -272,7 +277,7 @@ imfs_openat(int dirfd, const char *path, int flags, mode_t mode)
 
 		Node *parent_node;
 
-		if (dirfd == -1) {
+		if (dirfd == AT_FDCWD) {
 			parent_node = g_root_node;
 		} else {
 			parent_node = imfs_find_node_namecomp(dirfd, namecomp, count - 1);
@@ -312,7 +317,7 @@ imfs_openat(int dirfd, const char *path, int flags, mode_t mode)
 int
 imfs_open(const char *path, int flags, mode_t mode)
 {
-	return imfs_openat(-1, path, flags, mode);
+	return imfs_openat(AT_FDCWD, path, flags, mode);
 }
 
 int
