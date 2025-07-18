@@ -2,3 +2,18 @@
 
 Emulate a POSIX-compliant FS interface with nodes stored in memory. 
 
+Building
+--- 
+
+To build as a library:
+
+make lib 
+
+To build with the main function:
+
+make imfs
+
+To build and run tests 
+
+make test # Run all tests
+make test-<prefix> # Run all tests in the group starting with the prefix

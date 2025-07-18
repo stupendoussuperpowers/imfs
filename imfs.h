@@ -64,3 +64,5 @@ Node *imfs_find_node(int dirfd, const char *path);
 Node *imfs_create_node(const char *name, NodeType type);
 int imfs_allocate_fd(Node *node);
 void imfs_free_fd(int fd);
+
+void imfs_init();

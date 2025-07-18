@@ -60,12 +60,10 @@ split_path(const char *path, int *count, char namecomp[MAX_DEPTH][MAX_NODE_NAME]
 	}
 	namecomp[*count][current_len] = '\0';
 	(*count)++;
-
-	printf("count: %d, path: %s\n", *count, path);
 }
 
 int
-str_compare(char *a, char *b)
+str_compare(const char *a, const char *b)
 {
 	int a_len = 0;
 	while (a[a_len] != '\0')
@@ -87,7 +85,7 @@ str_compare(char *a, char *b)
 }
 
 void
-str_ncopy(char *dst, char *src, int n)
+str_ncopy(char *dst, const char *src, int n)
 {
 	size_t i;
 	for (i = 0; i < n && src[i] != '\0'; i++) {
@@ -174,8 +172,6 @@ imfs_find_node_namecomp(int dirfd, const char namecomp[MAX_DEPTH][MAX_NODE_NAME]
 
 	for (int i = 0; i < count && current; i++) {
 		Node *found = NULL;
-		printf("Finding: %s\n", namecomp[i]);
-
 		for (size_t j = 0; j < current->count; j++) {
 			if (str_compare(namecomp[i], current->children[j].name) == 1) {
 				switch (current->children[j].node->type) {
@@ -243,7 +239,7 @@ add_child(Node *parent, Node *node)
 	return 0;
 }
 
-static void
+void
 imfs_init()
 {
 	for (int i = 0; i < MAX_FDS; i++) {
@@ -535,6 +531,7 @@ link(const char *oldpath, const char *newpath)
 // Main func for local testing.
 //
 
+#ifndef LIB 
 int
 main()
 {
@@ -586,3 +583,4 @@ main()
 
 	return 0;
 }
+#endif
