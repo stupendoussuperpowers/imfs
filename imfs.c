@@ -501,12 +501,18 @@ linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int
 	char namecomp[MAX_DEPTH][MAX_NODE_NAME];
 	int count;
 
+	Node *newnode = imfs_find_node(newdirfd, newpath);
+	if (newnode != NULL) {
+		errno = EINVAL;
+		return -1;
+	}
+
 	split_path(newpath, &count, namecomp);
 
 	char *filename = namecomp[count - 1];
 
 	Node *newnode_parent = imfs_find_node_namecomp(newdirfd, namecomp, count - 1);
-	Node *newnode = imfs_create_node(filename, M_LNK);
+	newnode = imfs_create_node(filename, M_LNK);
 
 	newnode->link = oldnode;
 
