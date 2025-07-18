@@ -1,3 +1,5 @@
+#include <sys/fcntl.h>
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -58,11 +60,22 @@ split_path(const char *path, int *count, char namecomp[MAX_DEPTH][MAX_NODE_NAME]
 	}
 	namecomp[*count][current_len] = '\0';
 	(*count)++;
+
+	printf("count: %d, path: %s\n", *count, path);
 }
 
 int
 str_compare(char *a, char *b)
 {
+	int a_len = 0;
+	while (a[a_len] != '\0')
+		a_len++;
+	int b_len = 0;
+	while (b[b_len] != '\0')
+		b_len++;
+
+	if (a_len != b_len)
+		return 0;
 	int i = 0, j = 0;
 	while (a[i] != '\0' && b[j] != '\0') {
 		if (a[i] != b[j])
@@ -101,30 +114,6 @@ mem_cpy(void *dst, const void *src, size_t n)
 //
 //  IMFS Utils
 //
-
-static void
-imfs_init()
-{
-	for (int i = 0; i < MAX_FDS; i++) {
-		g_fdtable[i] = (struct FileDesc) {
-			.node = NULL,
-			.offset = 0,
-		};
-	}
-
-	for (int i = 0; i < MAX_NODES; i++) {
-		g_nodes[i] = (struct Node) {
-			.in_use = 0,
-			.children = NULL,
-			.count = 0,
-			.data = NULL,
-			.size = 0,
-		};
-	}
-
-	g_root_node = imfs_create_node("/", M_DIR);
-	g_root_node->parent = g_root_node;
-}
 
 Node *
 imfs_create_node(const char *name, NodeType type)
@@ -185,10 +174,21 @@ imfs_find_node_namecomp(int dirfd, const char namecomp[MAX_DEPTH][MAX_NODE_NAME]
 
 	for (int i = 0; i < count && current; i++) {
 		Node *found = NULL;
+		printf("Finding: %s\n", namecomp[i]);
 
 		for (size_t j = 0; j < current->count; j++) {
-			if (str_compare(current->children[j].name, namecomp[i]) == 1) {
-				found = current->children[j].node;
+			if (str_compare(namecomp[i], current->children[j].name) == 1) {
+				switch (current->children[j].node->type) {
+				case M_LNK:
+					found = current->children[j].node->link;
+					break;
+				case M_DIR:
+				case M_REG:
+					found = current->children[j].node;
+					break;
+				default:
+					found = NULL;
+				}
 				break;
 			}
 		}
@@ -243,6 +243,46 @@ add_child(Node *parent, Node *node)
 	return 0;
 }
 
+static void
+imfs_init()
+{
+	for (int i = 0; i < MAX_FDS; i++) {
+		g_fdtable[i] = (struct FileDesc) {
+			.node = NULL,
+			.offset = 0,
+		};
+	}
+
+	for (int i = 0; i < MAX_NODES; i++) {
+		g_nodes[i] = (struct Node) {
+			.type = M_NON,
+			.in_use = 0,
+			.children = NULL,
+			.count = 0,
+			.data = NULL,
+			.size = 0,
+		};
+	}
+
+	g_root_node = imfs_create_node("/", M_DIR);
+	g_root_node->parent = g_root_node;
+
+	Node *dot = imfs_create_node(".", M_LNK);
+	if (!dot)
+		exit(1);
+	dot->link = g_root_node;
+
+	Node *dotdot = imfs_create_node("..", M_LNK);
+	if (!dotdot)
+		exit(1);
+
+	if (add_child(g_root_node, dot) != 0)
+		exit(1);
+	if (add_child(g_root_node, dotdot) != 0)
+		exit(1);
+	dotdot->link = g_root_node;
+}
+
 //
 // FS Entrypoints
 //
@@ -278,11 +318,8 @@ imfs_openat(int dirfd, const char *path, int flags, mode_t mode)
 
 		Node *parent_node;
 
-		if (dirfd == AT_FDCWD) {
-			parent_node = g_root_node;
-		} else {
-			parent_node = imfs_find_node_namecomp(dirfd, namecomp, count - 1);
-		}
+		parent_node = imfs_find_node_namecomp(dirfd, namecomp, count - 1);
+
 		if (!parent_node || parent_node->type != M_DIR) {
 			errno = ENOTDIR;
 			return -1;
@@ -306,7 +343,7 @@ imfs_openat(int dirfd, const char *path, int flags, mode_t mode)
 			return -1;
 		}
 
-		if (node->type == M_DIR) {
+		if (node->type == M_DIR && !(flags & O_DIRECTORY)) {
 			errno = EISDIR;
 			return -1;
 		}
@@ -426,6 +463,22 @@ imfs_mkdirat(int fd, const char *path, mode_t mode)
 		return -1;
 	}
 
+	Node *dot = imfs_create_node(".", M_LNK);
+	if (!dot)
+		return -1;
+	dot->link = node;
+
+	Node *dotdot = imfs_create_node("..", M_LNK);
+	if (!dotdot)
+		return -1;
+
+	if (add_child(node, dot) != 0)
+		return -1;
+	if (add_child(node, dotdot) != 0)
+		return -1;
+
+	dotdot->link = node->parent;
+
 	return 0;
 }
 
@@ -433,6 +486,43 @@ int
 imfs_mkdir(const char *path, mode_t mode)
 {
 	return imfs_mkdirat(AT_FDCWD, path, mode);
+}
+
+int
+linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags)
+{
+	Node *oldnode = imfs_find_node(olddirfd, oldpath);
+
+	if (!oldnode) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	char namecomp[MAX_DEPTH][MAX_NODE_NAME];
+	int count;
+
+	split_path(newpath, &count, namecomp);
+
+	char *filename = namecomp[count - 1];
+
+	Node *newnode_parent = imfs_find_node_namecomp(newdirfd, namecomp, count - 1);
+	Node *newnode = imfs_create_node(filename, M_LNK);
+
+	newnode->link = oldnode;
+
+	if (add_child(newnode_parent, newnode) != 0) {
+		newnode->in_use = 0;
+		errno = ENOMEM;
+		return -1;
+	}
+
+	return 0;
+}
+
+int
+link(const char *oldpath, const char *newpath)
+{
+	return linkat(AT_FDCWD, oldpath, AT_FDCWD, newpath, 0);
 }
 
 //
@@ -477,6 +567,14 @@ main()
 	mkd = imfs_mkdir("/folder/folder_2", 0);
 
 	fd = imfs_open("/folder/folder_2/file_3.txt", O_CREAT | O_WRONLY, 0);
+	printf("fd: %d\n", fd);
+	imfs_close(fd);
+
+	fd = imfs_open("/folder/./folder_2/file_3.txt", O_RDONLY, 0);
+	printf("fd: %d\n", fd);
+	imfs_close(fd);
+
+	fd = imfs_open("/folder/folder_2/../folder_2", O_RDONLY | O_DIRECTORY, 0);
 	printf("fd: %d\n", fd);
 	imfs_close(fd);
 
