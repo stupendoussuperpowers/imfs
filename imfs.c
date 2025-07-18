@@ -9,6 +9,14 @@
 
 static struct FileDesc g_fdtable[MAX_PROCS][MAX_FDS];
 static struct Node g_nodes[MAX_NODES];
+
+// This tracks "Holes" in the g_nodes table, caused by nodes that were deleted.
+// When creating a new node, we check which index this free list points to and creates
+// the node there. In case there are no free nodes in this list, we use the global
+// g_next_node index.
+static int g_free_list[MAX_NODES];
+static int g_free_list_size = -1;
+
 static struct Node *g_root_node = NULL;
 
 static int g_next_fd = 0;
@@ -37,7 +45,7 @@ str_rchr(const char *s, const char c)
 	return last;
 }
 
-void
+static void
 split_path(const char *path, int *count, char namecomp[MAX_DEPTH][MAX_NODE_NAME])
 {
 	*count = 0;
@@ -62,7 +70,7 @@ split_path(const char *path, int *count, char namecomp[MAX_DEPTH][MAX_NODE_NAME]
 	(*count)++;
 }
 
-int
+static int
 str_compare(const char *a, const char *b)
 {
 	int a_len = 0;
@@ -84,7 +92,7 @@ str_compare(const char *a, const char *b)
 	return 1;
 }
 
-void
+static void
 str_ncopy(char *dst, const char *src, int n)
 {
 	size_t i;
@@ -97,7 +105,7 @@ str_ncopy(char *dst, const char *src, int n)
 	}
 }
 
-void
+static void
 mem_cpy(void *dst, const void *src, size_t n)
 {
 	size_t i;
@@ -113,21 +121,33 @@ mem_cpy(void *dst, const void *src, size_t n)
 //  IMFS Utils
 //
 
-Node *
+static Node *
 imfs_create_node(const char *name, NodeType type)
 {
-	if (g_next_node >= MAX_NODES) {
+	if (g_free_list_size == -1 && g_next_node >= MAX_NODES) {
 		errno = ENOMEM;
 		return NULL;
 	}
 
-	Node *node = &g_nodes[g_next_node++];
-	node->in_use = 1;
+	int node_index;
+	if (g_free_list_size == -1)
+		node_index = g_next_node++;
+	else
+		node_index = g_free_list[g_free_list_size--];
+
+	Node *node = &g_nodes[node_index];
+
+	if (node->type != M_NON) {
+		errno = ENOMEM;
+		return NULL;
+	}
+
+	node->in_use = 0;
 	node->type = type;
 	node->size = 0;
-	node->count = 0;
-	node->children = NULL;
-	node->data = NULL;
+	node->d_count = 0;
+	node->d_children = NULL;
+	node->r_data = NULL;
 	node->parent = NULL;
 
 	str_ncopy(node->name, name, MAX_NODE_NAME - 1);
@@ -135,7 +155,7 @@ imfs_create_node(const char *name, NodeType type)
 	return node;
 }
 
-int
+static int
 imfs_allocate_fd(int cage_id, Node *node)
 {
 	if (!node)
@@ -155,10 +175,12 @@ imfs_allocate_fd(int cage_id, Node *node)
 		.offset = 0,
 	};
 
+	node->in_use++;
+
 	return i;
 }
 
-Node *
+static Node *
 imfs_find_node_namecomp(int cage_id, int dirfd, const char namecomp[MAX_DEPTH][MAX_NODE_NAME], int count)
 {
 	if (count == 0)
@@ -172,15 +194,15 @@ imfs_find_node_namecomp(int cage_id, int dirfd, const char namecomp[MAX_DEPTH][M
 
 	for (int i = 0; i < count && current; i++) {
 		Node *found = NULL;
-		for (size_t j = 0; j < current->count; j++) {
-			if (str_compare(namecomp[i], current->children[j].name) == 1) {
-				switch (current->children[j].node->type) {
+		for (size_t j = 0; j < current->d_count; j++) {
+			if (str_compare(namecomp[i], current->d_children[j].name) == 1) {
+				switch (current->d_children[j].node->type) {
 				case M_LNK:
-					found = current->children[j].node->link;
+					found = current->d_children[j].node->l_link;
 					break;
 				case M_DIR:
 				case M_REG:
-					found = current->children[j].node;
+					found = current->d_children[j].node;
 					break;
 				default:
 					found = NULL;
@@ -199,7 +221,7 @@ imfs_find_node_namecomp(int cage_id, int dirfd, const char namecomp[MAX_DEPTH][M
 	return current;
 }
 
-Node *
+static Node *
 imfs_find_node(int cage_id, int dirfd, const char *path)
 {
 	if (!path || !g_root_node)
@@ -216,33 +238,68 @@ imfs_find_node(int cage_id, int dirfd, const char *path)
 	return imfs_find_node_namecomp(cage_id, dirfd, namecomps, count);
 }
 
-int
+static int
 add_child(Node *parent, Node *node)
 {
 	if (!parent || !node || parent->type != M_DIR)
 		return -1;
 
-	size_t new_count = parent->count + 1;
-	DirEnt *new_children = realloc(parent->children, new_count * sizeof(DirEnt));
+	size_t new_count = parent->d_count + 1;
+	DirEnt *new_children = realloc(parent->d_children, new_count * sizeof(DirEnt));
 
 	if (!new_children)
 		return -1;
 
-	new_children[parent->count].node = node;
+	new_children[parent->d_count].node = node;
 
-	parent->children = new_children;
+	parent->d_children = new_children;
 
-	str_ncopy(parent->children[parent->count].name, node->name, MAX_NODE_NAME - 1);
-	parent->count = new_count;
+	str_ncopy(parent->d_children[parent->d_count].name, node->name, MAX_NODE_NAME - 1);
+	parent->d_count = new_count;
 	node->parent = parent;
 
+	return 0;
+}
+
+static int
+imfs_remove_file(Node *node)
+{
+	g_free_list[++g_free_list_size] = node->index;
+	node->type = M_NON;
+
+	node->parent->d_count--;
+	return 0;
+}
+
+static int
+imfs_remove_dir(Node *node)
+{
+	if (node == g_root_node || node->d_children > 0) {
+		errno = EBUSY;
+		return -1;
+	}
+
+	g_free_list[++g_free_list_size] = node->index;
+	node->type = M_NON;
+
+	node->parent->d_count--;
+	return 0;
+}
+
+static int
+imfs_remove_link(Node *node)
+{
+	g_free_list[++g_free_list_size] = node->index;
+	node->type = M_NON;
+
+	node->parent->d_count--;
 	return 0;
 }
 
 void
 imfs_init()
 {
-	for(int cage_id = 0; cage_id < MAX_PROCS; cage_id++) {
+	for (int cage_id = 0; cage_id < MAX_PROCS; cage_id++) {
 		for (int i = 0; i < MAX_FDS; i++) {
 			g_fdtable[cage_id][i] = (struct FileDesc) {
 				.node = NULL,
@@ -254,11 +311,11 @@ imfs_init()
 	for (int i = 0; i < MAX_NODES; i++) {
 		g_nodes[i] = (struct Node) {
 			.type = M_NON,
+			.index = i,
 			.in_use = 0,
-			.children = NULL,
-			.count = 0,
-			.data = NULL,
+			.d_count = 0,
 			.size = 0,
+			.info = NULL,
 		};
 	}
 
@@ -268,7 +325,7 @@ imfs_init()
 	Node *dot = imfs_create_node(".", M_LNK);
 	if (!dot)
 		exit(1);
-	dot->link = g_root_node;
+	dot->l_link = g_root_node;
 
 	Node *dotdot = imfs_create_node("..", M_LNK);
 	if (!dotdot)
@@ -278,7 +335,7 @@ imfs_init()
 		exit(1);
 	if (add_child(g_root_node, dotdot) != 0)
 		exit(1);
-	dotdot->link = g_root_node;
+	dotdot->l_link = g_root_node;
 }
 
 //
@@ -329,11 +386,9 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 		}
 
 		if (add_child(parent_node, node) != 0) {
-			node->in_use = 0;
 			errno = ENOMEM;
 			return -1;
 		}
-
 	} else {
 		// File Exists
 		if (flags & O_EXCL && flags & O_CREAT) {
@@ -364,6 +419,8 @@ imfs_close(int cage_id, int fd)
 		return -1;
 	}
 
+	g_fdtable[cage_id][fd].node->in_use--;
+
 	g_fdtable[cage_id][fd] = (struct FileDesc) {
 		.node = NULL,
 		.offset = 0,
@@ -388,13 +445,13 @@ imfs_write(int cage_id, int fd, const void *buf, size_t count)
 
 	size_t new_size = g_fdtable[cage_id][fd].offset + count;
 	if (new_size > node->size) {
-		char *new_data = realloc(node->data, new_size);
+		char *new_data = realloc(node->r_data, new_size);
 
-		node->data = new_data;
+		node->r_data = new_data;
 		node->size = new_size;
 	}
 
-	mem_cpy(node->data + g_fdtable[cage_id][fd].offset, buf, count);
+	mem_cpy(node->r_data + g_fdtable[cage_id][fd].offset, buf, count);
 	g_fdtable[cage_id][fd].offset += count;
 
 	return count;
@@ -424,7 +481,7 @@ imfs_read(int cage_id, int fd, void *buf, size_t count)
 	size_t available = node->size - c_fd.offset;
 	size_t to_read = count < available ? count : available;
 
-	mem_cpy(buf, node->data + c_fd.offset, to_read);
+	mem_cpy(buf, node->r_data + c_fd.offset, to_read);
 	c_fd.offset += to_read;
 
 	g_fdtable[cage_id][fd] = c_fd;
@@ -448,7 +505,16 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 	split_path(path, &count, namecomp);
 	char *filename = namecomp[count - 1];
 
+	if(str_compare(filename, ".") || str_compare(filename, "..")){
+		errno = EINVAL;
+		return -1;
+	}
+
 	parent = imfs_find_node_namecomp(cage_id, fd, namecomp, count - 1);
+	if(!parent) {
+		errno = EINVAL;
+		return -1;
+	}
 
 	Node *node = imfs_create_node(filename, M_DIR);
 	if (!node) {
@@ -456,7 +522,6 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 	}
 
 	if (add_child(parent, node) != 0) {
-		node->in_use = 0;
 		errno = ENOMEM;
 		return -1;
 	}
@@ -464,7 +529,7 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 	Node *dot = imfs_create_node(".", M_LNK);
 	if (!dot)
 		return -1;
-	dot->link = node;
+	dot->l_link = node;
 
 	Node *dotdot = imfs_create_node("..", M_LNK);
 	if (!dotdot)
@@ -475,7 +540,7 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 	if (add_child(node, dotdot) != 0)
 		return -1;
 
-	dotdot->link = node->parent;
+	dotdot->l_link = node->parent;
 
 	return 0;
 }
@@ -512,10 +577,9 @@ imfs_linkat(int cage_id, int olddirfd, const char *oldpath, int newdirfd, const 
 	Node *newnode_parent = imfs_find_node_namecomp(cage_id, newdirfd, namecomp, count - 1);
 	newnode = imfs_create_node(filename, M_LNK);
 
-	newnode->link = oldnode;
+	newnode->l_link = oldnode;
 
 	if (add_child(newnode_parent, newnode) != 0) {
-		newnode->in_use = 0;
 		errno = ENOMEM;
 		return -1;
 	}
@@ -529,11 +593,50 @@ imfs_link(int cage_id, const char *oldpath, const char *newpath)
 	return imfs_linkat(cage_id, AT_FDCWD, oldpath, AT_FDCWD, newpath, 0);
 }
 
+int
+imfs_remove(int cage_id, const char *pathname)
+{
+	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
+
+	if (!node) {
+		errno = ENOENT;
+		return -1;
+	}
+
+	if (node->in_use) {
+		errno = EBUSY;
+		return -1;
+	}
+
+	switch (node->type) {
+	case M_DIR:
+		return imfs_remove_dir(node);
+	case M_LNK:
+		return imfs_remove_link(node);
+	case M_REG:
+		return imfs_remove_file(node);
+	default:
+		return 0;
+	}
+}
+
+int
+imfs_rmdir(int cage_id, const char *pathname)
+{
+	return imfs_remove(cage_id, pathname);
+}
+
+int
+imfs_unlink(int cage_id, const char *pathname)
+{
+	return imfs_remove(cage_id, pathname);
+}
+
 //
 // Main func for local testing.
 //
 
-#ifndef LIB 
+#ifndef LIB
 int
 main()
 {
@@ -544,15 +647,38 @@ main()
 	printf("[write]\n");
 	int fd = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0);
 	printf("fd: %d\n", fd);
+	char *buf = "hello";
+	imfs_write(cage_id, fd, buf, 6);
+
+	imfs_close(cage_id, fd);
+
+	fd = imfs_open(cage_id, "/secondfile.txt", O_CREAT | O_WRONLY, 0);
+	printf("fd: %d\n", fd);
+	imfs_close(cage_id, fd);
+
+	fd = imfs_open(cage_id, "/thirdfile.txt", O_CREAT | O_WRONLY, 0);
+	printf("fd: %d\n", fd);
 	imfs_close(cage_id, fd);
 
 	printf("[read]\n");
-	fd = imfs_open(cage_id, "./firstfile.txt", O_RDONLY, 0);
-	char *buf;
-	imfs_read(cage_id, fd, buf, 6);
+	fd = imfs_open(cage_id, "/firstfile.txt", O_RDONLY, 0);
+	char *readbuf;
+	imfs_read(cage_id, fd, readbuf, 6);
 	printf("Read: %s\n", buf);
 	imfs_close(cage_id, fd);
-	
+
+	// Try deleting an open node, it should fail
+	fd = imfs_open(cage_id, "/firstfile.txt", O_RDONLY, 0);
+	printf("remove: %d\n", imfs_remove(cage_id, "/firstfile.txt"));
+
+	// Delete files then remake it, see where it ends up.
+	imfs_close(cage_id, fd);
+	printf("remove: %d\n", imfs_remove(cage_id, "/firstfile.txt"));
+
+	fd = imfs_open(cage_id, "/newfile.txt", O_CREAT | O_WRONLY, 0);
+	printf("fd: %d\n", fd);
+	imfs_close(cage_id, fd);
+
 	return 0;
 }
 #endif

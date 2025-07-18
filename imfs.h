@@ -4,37 +4,65 @@
 #include <fcntl.h>
 #include <stddef.h>
 
-#define MAX_NODE_NAME 64
-#define MAX_NODE_SIZE 4096
-#define MAX_FDS		  1024
-#define MAX_NODES	  1024
-#define MAX_DEPTH	  10
+#define MAX_NODE_NAME	64
+#define MAX_NODE_SIZE	4096
+#define MAX_FDS		1024
+#define MAX_NODES	1024
+#define MAX_DEPTH	10
 #define MAX_PROCS	128
 
 typedef enum {
 	M_REG,
 	M_DIR,
 	M_LNK,
+	// Indicated free node
 	M_NON,
 } NodeType;
 
+#define d_children	info.dir.children
+#define d_count		info.dir.count
+#define l_link		info.lnk.link
+#define r_data		info.reg.data
+
 typedef struct Node {
 	NodeType type;
+	int index;
 	size_t size;
-
-	// M_REG
-	char *data;
-
-	// M_LNK
-	struct Node *link;
-
-	// M_DIR
-	struct DirEnt *children;
-	size_t count;
 
 	char name[MAX_NODE_NAME];
 	struct Node *parent;
+	// Number of FD's attached to this node
 	int in_use;
+	
+	// TODO: Change to union?
+
+	/*
+	// M_REG
+	char *r_data;
+		
+	// M_LNK
+	struct Node *l_link;
+	
+	// M_DIR
+	struct DirEnt *d_children;
+	size_t d_count;
+	*/
+
+	union {
+		struct {
+			char *data;
+		} reg;
+
+		struct {
+			struct Node *link;
+		} lnk;
+
+		struct {
+			struct DirEnt *children;
+			size_t count;
+		} dir;
+	} info;
+
 } Node;
 
 typedef struct DirEnt {
@@ -56,14 +84,10 @@ int imfs_close(int cage_id, int fd);
 int imfs_mkdir(int cage_id, const char *path, mode_t mode);
 int imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode);
 int imfs_rmdir(int cage_id, const char *path);
+int imfs_remove(int cage_id, const char *path);
 int imfs_link(int cage_id, const char *oldpath, const char *newpath);
 int imfs_linkat(int cage_id, int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags);
 int imfs_unlink(int cage_id, const char *path);
 off_t imfs_lseek(int cage_id, int fd, off_t offset, int whence);
-
-Node *imfs_find_node(int cage_id, int dirfd, const char *path);
-Node *imfs_create_node(const char *name, NodeType type);
-int imfs_allocate_fd(int cage_id, Node *node);
-void imfs_free_fd(int cage_id, int fd);
 
 void imfs_init();
