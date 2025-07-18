@@ -9,6 +9,7 @@
 #define MAX_FDS		  1024
 #define MAX_NODES	  1024
 #define MAX_DEPTH	  10
+#define MAX_PROCS	128
 
 typedef enum {
 	M_REG,
@@ -47,22 +48,22 @@ struct FileDesc {
 	int offset;
 };
 
-int imfs_open(const char *path, int flags, mode_t mode);
-int imfs_openat(int dirfd, const char *path, int flags, mode_t mode);
-ssize_t imfs_read(int fd, void *buf, size_t count);
-ssize_t imfs_write(int fd, const void *buf, size_t count);
-int imfs_close(int fd);
-int imfs_mkdir(const char *path, mode_t mode);
-int imfs_mkdirat(int fd, const char *path, mode_t mode);
-int imfs_rmdir(const char *path);
-int link(const char *oldpath, const char *newpath);
-int linkat(int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags);
-int imfs_unlink(const char *path);
-off_t imfs_lseek(int fd, off_t offset, int whence);
+int imfs_open(int cage_id, const char *path, int flags, mode_t mode);
+int imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode);
+ssize_t imfs_read(int cage_id, int fd, void *buf, size_t count);
+ssize_t imfs_write(int cage_id, int fd, const void *buf, size_t count);
+int imfs_close(int cage_id, int fd);
+int imfs_mkdir(int cage_id, const char *path, mode_t mode);
+int imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode);
+int imfs_rmdir(int cage_id, const char *path);
+int imfs_link(int cage_id, const char *oldpath, const char *newpath);
+int imfs_linkat(int cage_id, int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags);
+int imfs_unlink(int cage_id, const char *path);
+off_t imfs_lseek(int cage_id, int fd, off_t offset, int whence);
 
-Node *imfs_find_node(int dirfd, const char *path);
+Node *imfs_find_node(int cage_id, int dirfd, const char *path);
 Node *imfs_create_node(const char *name, NodeType type);
-int imfs_allocate_fd(Node *node);
-void imfs_free_fd(int fd);
+int imfs_allocate_fd(int cage_id, Node *node);
+void imfs_free_fd(int cage_id, int fd);
 
 void imfs_init();

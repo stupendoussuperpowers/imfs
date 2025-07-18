@@ -17,3 +17,7 @@ To build and run tests
 
 make test # Run all tests
 make test-<prefix> # Run all tests in the group starting with the prefix
+
+Make imfs with debug symbols:
+
+make debug
