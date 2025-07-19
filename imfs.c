@@ -7,8 +7,12 @@
 
 #include "imfs.h"
 
-static struct FileDesc g_fdtable[MAX_PROCS][MAX_FDS];
-static struct Node g_nodes[MAX_NODES];
+// Each Process (Cage) has it's own FD Table, all of which are initiated 
+// in memory when imfs_init() is called. Node are allocated using the use of 
+// g_next_node and g_free_list, as described below.
+static FileDesc g_fdtable[MAX_PROCS][MAX_FDS];
+static Node g_nodes[MAX_NODES];
+static int g_next_node = 0;
 
 // This tracks "Holes" in the g_nodes table, caused by nodes that were deleted.
 // When creating a new node, we check which index this free list points to and creates
@@ -17,10 +21,7 @@ static struct Node g_nodes[MAX_NODES];
 static int g_free_list[MAX_NODES];
 static int g_free_list_size = -1;
 
-static struct Node *g_root_node = NULL;
-
-static int g_next_fd = 0;
-static int g_next_node = 0;
+static Node *g_root_node = NULL;
 
 //
 // String Utils
@@ -170,7 +171,7 @@ imfs_allocate_fd(int cage_id, Node *node)
 		return -1;
 	}
 
-	g_fdtable[cage_id][i] = (struct FileDesc) {
+	g_fdtable[cage_id][i] = (FileDesc) {
 		.node = node,
 		.offset = 0,
 	};
@@ -301,7 +302,7 @@ imfs_init()
 {
 	for (int cage_id = 0; cage_id < MAX_PROCS; cage_id++) {
 		for (int i = 0; i < MAX_FDS; i++) {
-			g_fdtable[cage_id][i] = (struct FileDesc) {
+			g_fdtable[cage_id][i] = (FileDesc) {
 				.node = NULL,
 				.offset = 0,
 			};
@@ -309,7 +310,7 @@ imfs_init()
 	}
 
 	for (int i = 0; i < MAX_NODES; i++) {
-		g_nodes[i] = (struct Node) {
+		g_nodes[i] = (Node) {
 			.type = M_NON,
 			.index = i,
 			.in_use = 0,
@@ -387,6 +388,7 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 
 		if (add_child(parent_node, node) != 0) {
 			errno = ENOMEM;
+			node->type = M_NON;
 			return -1;
 		}
 	} else {
@@ -421,7 +423,7 @@ imfs_close(int cage_id, int fd)
 
 	g_fdtable[cage_id][fd].node->in_use--;
 
-	g_fdtable[cage_id][fd] = (struct FileDesc) {
+	g_fdtable[cage_id][fd] = (FileDesc) {
 		.node = NULL,
 		.offset = 0,
 	};
@@ -460,7 +462,7 @@ imfs_write(int cage_id, int fd, const void *buf, size_t count)
 ssize_t
 imfs_read(int cage_id, int fd, void *buf, size_t count)
 {
-	struct FileDesc c_fd = g_fdtable[cage_id][fd];
+	FileDesc c_fd = g_fdtable[cage_id][fd];
 
 	if (fd < 0 || fd >= MAX_FDS || !c_fd.node || !buf) {
 		errno = EBADF;
@@ -523,6 +525,7 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 
 	if (add_child(parent, node) != 0) {
 		errno = ENOMEM;
+		node->type = M_NON;
 		return -1;
 	}
 
@@ -581,6 +584,7 @@ imfs_linkat(int cage_id, int olddirfd, const char *oldpath, int newdirfd, const 
 
 	if (add_child(newnode_parent, newnode) != 0) {
 		errno = ENOMEM;
+		newnode->type = M_NON;
 		return -1;
 	}
 

@@ -26,40 +26,28 @@ typedef enum {
 
 typedef struct Node {
 	NodeType type;
-	int index;
-	size_t size;
+	int index;			/* Index in the global g_nodes */
+	size_t size;			/* Size for offset related calls. */
 
-	char name[MAX_NODE_NAME];
-	struct Node *parent;
-	// Number of FD's attached to this node
-	int in_use;
+	char name[MAX_NODE_NAME];	/* File name */ 
+	struct Node *parent;		/* Parent node */
+	int in_use;			/* Number of FD's attached to this node */
 	
-	// TODO: Change to union?
-
-	/*
-	// M_REG
-	char *r_data;
-		
-	// M_LNK
-	struct Node *l_link;
-	
-	// M_DIR
-	struct DirEnt *d_children;
-	size_t d_count;
-	*/
-
 	union {
+		// M_REG
 		struct {
-			char *data;
+			char *data;			/* File contents stored as a char array */
 		} reg;
 
+		// M_LNK
 		struct {
-			struct Node *link;
+			struct Node *link;		/* Point to linked node. */
 		} lnk;
 
+		// M_DIR
 		struct {
-			struct DirEnt *children;
-			size_t count;
+			struct DirEnt *children;	/* Directory contents. */
+			size_t count;			/* len(children) including . and .. */
 		} dir;
 	} info;
 
@@ -70,11 +58,11 @@ typedef struct DirEnt {
 	struct Node *node;
 } DirEnt;
 
-struct FileDesc {
+typedef struct FileDesc {
 	int stat;
 	Node *node;
-	int offset;
-};
+	int offset;	/* How many bytes have been read. */
+} FileDesc;
 
 int imfs_open(int cage_id, const char *path, int flags, mode_t mode);
 int imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode);
