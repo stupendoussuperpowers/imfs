@@ -13,7 +13,7 @@ To build with the main function:
 
 make imfs
 
-To build and run tests 
+To build and run tests: 
 
 make test # Run all tests
 make test-<prefix> # Run all tests in the group starting with the prefix

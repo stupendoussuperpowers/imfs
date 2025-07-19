@@ -7,8 +7,8 @@
 
 #include "imfs.h"
 
-// Each Process (Cage) has it's own FD Table, all of which are initiated 
-// in memory when imfs_init() is called. Node are allocated using the use of 
+// Each Process (Cage) has it's own FD Table, all of which are initiated
+// in memory when imfs_init() is called. Node are allocated using the use of
 // g_next_node and g_free_list, as described below.
 static FileDesc g_fdtable[MAX_PROCS][MAX_FDS];
 static Node g_nodes[MAX_NODES];
@@ -51,7 +51,9 @@ split_path(const char *path, int *count, char namecomp[MAX_DEPTH][MAX_NODE_NAME]
 {
 	*count = 0;
 
-	int i = 1;
+	int i = 0;
+	if (path[i] == '/')
+		i++;
 
 	char current[256];
 	int current_len = 0;
@@ -507,13 +509,13 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 	split_path(path, &count, namecomp);
 	char *filename = namecomp[count - 1];
 
-	if(str_compare(filename, ".") || str_compare(filename, "..")){
+	if (str_compare(filename, ".") || str_compare(filename, "..")) {
 		errno = EINVAL;
 		return -1;
 	}
 
 	parent = imfs_find_node_namecomp(cage_id, fd, namecomp, count - 1);
-	if(!parent) {
+	if (!parent) {
 		errno = EINVAL;
 		return -1;
 	}

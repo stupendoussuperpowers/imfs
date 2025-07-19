@@ -1,5 +1,7 @@
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -27,14 +29,58 @@ static char *group_filter;
 
 typedef int (*TestFunc)(void);
 
+void
+load_folder(char *path)
+{
+	MKDIR(path, 0);
+
+	DIR *dir = opendir(path);
+	struct dirent *entry;
+
+	while ((entry = readdir(dir)) != NULL) {
+		if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+			continue;
+
+		char fullpath[4096];
+		snprintf(fullpath, sizeof(fullpath), "%s/%s", path, entry->d_name);
+
+		struct stat st;
+		if (stat(fullpath, &st) == -1) {
+			perror(fullpath);
+			continue;
+		}
+
+		if (S_ISREG(st.st_mode)) {
+			FILE *fp = fopen(fullpath, "rb");
+			if (!fp)
+				continue;
+
+			int imfs_fd = OPEN(fullpath, O_CREAT | O_WRONLY, 0);
+
+			char buffer[1024];
+			size_t nread;
+			while ((nread = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+				WRITE(imfs_fd, buffer, nread);
+			}
+
+			fclose(fp);
+			CLOSE(imfs_fd);
+		} else {
+			load_folder(fullpath);
+		}
+	}
+}
+
 int
 test_imfs_open_exist()
 {
-	int fd = OPEN("/folder/file1.txt", O_RDONLY, 0);
+	int fd = OPEN("/test_folder/hello.txt", O_RDONLY, 0);
 	if (fd < 0) {
+		perror("");
 		return 1;
 	}
 	if (CLOSE(fd) != 0) {
+		perror("");
 		return 1;
 	}
 
@@ -44,7 +90,7 @@ test_imfs_open_exist()
 int
 test_imfs_open_create()
 {
-	int fd = OPEN("/folder/file_test.txt", O_CREAT | O_WRONLY, 0);
+	int fd = OPEN("/test_folder/file_imfs.txt", O_CREAT | O_WRONLY, 0);
 	if (fd < 0) {
 		return 1;
 	}
@@ -59,7 +105,7 @@ test_imfs_open_create()
 int
 test_imfs_openclose_invalid()
 {
-	int fd = OPEN("/folder/file_inexist.txt", O_RDONLY, 0);
+	int fd = OPEN("/test_folder/file_inexist.txt", O_RDONLY, 0);
 	if (fd > 0) {
 		return 1;
 	}
@@ -70,14 +116,16 @@ test_imfs_openclose_invalid()
 int
 test_read()
 {
-	int fd = OPEN("/folder/file_hello.txt", O_RDONLY, 0);
+	int fd = OPEN("/test_folder/hello.txt", O_RDONLY, 0);
+
 	if (fd < 0)
 		return 1;
 
-	char buf[6];
-	READ(fd, buf, 6);
+	char buf[7];
 
-	if (strcmp("hello", buf) != 0)
+	READ(fd, buf, 7);
+
+	if (strcmp("hello\n", buf) != 0)
 		return 1;
 
 	CLOSE(fd);
@@ -88,7 +136,7 @@ int
 test_write()
 {
 	char *buf = "hello world";
-	int fd = OPEN("/folder/file_new.txt", O_CREAT | O_WRONLY, 0);
+	int fd = OPEN("/test_folder/file_new.txt", O_CREAT | O_WRONLY, 0);
 	if (fd < 0)
 		return 1;
 
@@ -97,7 +145,7 @@ test_write()
 
 	CLOSE(fd);
 
-	fd = OPEN("/folder/file_new.txt", O_RDONLY, 0);
+	fd = OPEN("/test_folder/file_new.txt", O_RDONLY, 0);
 
 	char readbuf[12];
 	if (READ(fd, readbuf, 12) <= 0)
@@ -139,19 +187,7 @@ main(int argc, char *argv[])
 
 	imfs_init();
 
-	MKDIR("/folder", 0);
-	MKDIR("/folder/folder_2", 0);
-
-	int fd = OPEN("/folder/file1.txt", O_CREAT | O_WRONLY, 0);
-	CLOSE(fd);
-
-	fd = OPEN("/folder/folder_2/file2.txt", O_CREAT | O_WRONLY, 0);
-	CLOSE(fd);
-
-	fd = OPEN("/folder/file_hello.txt", O_CREAT | O_WRONLY, 0);
-	char *hello = "hello";
-	WRITE(fd, hello, 6);
-	CLOSE(fd);
+	load_folder("test_folder");
 
 	group_filter = "";
 	for (int i = 1; i < argc; i++) {
