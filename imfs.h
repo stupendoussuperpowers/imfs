@@ -60,6 +60,7 @@ typedef struct DirEnt {
 
 typedef struct FileDesc {
 	int stat;
+	struct FileDesc *link;
 	Node *node;
 	int offset;	/* How many bytes have been read. */
 } FileDesc;
@@ -77,5 +78,7 @@ int imfs_link(int cage_id, const char *oldpath, const char *newpath);
 int imfs_linkat(int cage_id, int olddirfd, const char *oldpath, int newdirfd, const char *newpath, int flags);
 int imfs_unlink(int cage_id, const char *path);
 off_t imfs_lseek(int cage_id, int fd, off_t offset, int whence);
+int imfs_dup(int cage_id, int oldfd);
+int imfs_dup2(int cage_id, int oldfd, int newfd);
 
 void imfs_init();
