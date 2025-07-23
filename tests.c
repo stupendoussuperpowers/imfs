@@ -306,4 +306,6 @@ main(int argc, char *argv[])
 			printf("%s\t%s\t%d\n", t.name, t.status ? "FAIL" : "PASS", t.err);
 		}
 	}
+
+	return failed;
 }
