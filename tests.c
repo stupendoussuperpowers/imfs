@@ -29,10 +29,22 @@
 		(ret2) = write(afd, buf, len);                \
 	} while (0)
 
+#define PWRITE(imfd, afd, buf, len, off, ret1, ret2)        \
+	do {                                                    \
+		(ret1) = imfs_pwrite(CAGE_ID, imfd, buf, len, off); \
+		(ret2) = pwrite(afd, buf, len, off);                \
+	} while (0)
+
 #define READ(imfd, afd, buf1, buf2, len, ret1, ret2)  \
 	do {                                              \
 		(ret1) = imfs_read(CAGE_ID, imfd, buf1, len); \
 		(ret2) = read(afd, buf2, len);                \
+	} while (0)
+
+#define PREAD(imfd, afd, buf1, buf2, len, off, ret1, ret2)  \
+	do {                                                    \
+		(ret1) = imfs_pread(CAGE_ID, imfd, buf1, len, off); \
+		(ret2) = pread(afd, buf2, len, off);                \
 	} while (0)
 
 #define MKDIR(path, mode, ret1, ret2)             \
@@ -230,6 +242,34 @@ test_read()
 }
 
 int
+test_pread()
+{
+	int fd, afd;
+	OPEN("test_folder/hello.txt", O_RDONLY, 0644, fd, afd);
+
+	if (fd < 0)
+		return 1;
+
+	char buf1[7] = "", buf2[7] = "";
+
+	int ret1, ret2;
+	PREAD(fd, afd, buf1, buf2, 2, 0, ret1, ret2);
+	if (ret1 != ret2)
+		return 1;
+
+	if (strncmp(buf1, buf2, 2))
+		return 1;
+
+	PREAD(fd, afd, buf1, buf2, 2, 0, ret1, ret2);
+	if (ret1 != ret2)
+		return 1;
+	if (strncmp(buf1, buf2, 2))
+		return 1;
+
+	return 0;
+}
+
+int
 test_write()
 {
 	char *buf = "hello world";
@@ -248,6 +288,43 @@ test_write()
 		return 1;
 
 	CLOSE(fd, afd, ret1, ret2);
+	return 0;
+}
+
+int
+test_pwrite()
+{
+	char *hello = "hello";
+	char *world = "world";
+
+	int fd, afd;
+	OPEN("test_folder/test_write.txt", O_RDWR, 0644, fd, afd);
+
+	if (afd == -1 || fd == -1)
+		return 1;
+
+	int ret1, ret2;
+
+	PWRITE(fd, afd, hello, 5, 0, ret1, ret2);
+	PWRITE(fd, afd, world, 5, 0, ret1, ret2);
+
+	printf("%d | %d \n", ret1, ret2);
+
+	if (ret1 != ret2)
+		return 1;
+
+	char buf1[5], buf2[5];
+	READ(fd, afd, buf1, buf2, 5, ret1, ret2);
+
+	printf("%d | %d \n", ret1, ret2);
+
+	printf("%s | %s \n", buf1, buf2);
+	if (ret1 != ret2)
+		return 1;
+
+	if (strncmp(buf1, buf2, 5))
+		return 1;
+
 	return 0;
 }
 
@@ -293,6 +370,8 @@ main(int argc, char *argv[])
 	run_test("Valid path.", "read", test_read);
 	run_test("Valid path.", "write", test_write);
 	run_test("dup reads.", "dup", test_dup);
+	run_test("pread", "pread", test_pread);
+	run_test("pwrite", "pwrite", test_pwrite);
 
 	printf("Passed: %d\n", passed);
 	printf("Failed: %d\n", failed);
