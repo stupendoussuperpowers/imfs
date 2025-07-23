@@ -7,25 +7,28 @@
 
 #include "imfs.h"
 
+static Node g_nodes[MAX_NODES];
+
 // Each Process (Cage) has it's own FD Table, all of which are initiated
 // in memory when imfs_init() is called. Node are allocated using the use of
 // g_next_node and g_free_list, as described below.
-static FileDesc g_fdtable[MAX_PROCS][MAX_FDS];
-static Node g_nodes[MAX_NODES];
-static int g_next_node = 0;
-
+//
 // This tracks "Holes" in the g_nodes table, caused by nodes that were deleted.
 // When creating a new node, we check which index this free list points to and creates
 // the node there. In case there are no free nodes in this list, we use the global
 // g_next_node index.
+static int g_next_node = 0;
 static int g_free_list[MAX_NODES];
 static int g_free_list_size = -1;
 
-static Node *g_root_node = NULL;
+static FileDesc g_fdtable[MAX_PROCS][MAX_FDS];
 
+// We use the same logic for fd allocations.
 static int g_next_fd[MAX_PROCS];
 static int g_fd_free_list[MAX_PROCS][MAX_FDS];
-static int g_fd_free_list_size[MAX_PROCS] = { -1 };
+static int g_fd_free_list_size[MAX_PROCS];
+
+static Node *g_root_node = NULL;
 
 //
 // String Utils
