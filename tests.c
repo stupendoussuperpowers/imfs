@@ -5,16 +5,65 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "imfs.h"
 
-#define CAGE_ID	   1
+#define CAGE_ID 1
 
-#define OPEN(...)  imfs_open(CAGE_ID, __VA_ARGS__)
-#define CLOSE(...) imfs_close(CAGE_ID, __VA_ARGS__)
-#define READ(...)  imfs_read(CAGE_ID, __VA_ARGS__)
-#define WRITE(...) imfs_write(CAGE_ID, __VA_ARGS__)
-#define MKDIR(...) imfs_mkdir(CAGE_ID, __VA_ARGS__)
+#define OPEN(path, flags, mode, imfd, afd)              \
+	do {                                                \
+		(imfd) = imfs_open(CAGE_ID, path, flags, mode); \
+		(afd) = open(path, flags, mode);                \
+	} while (0)
+
+#define CLOSE(imfd, afd, ret1, ret2)        \
+	do {                                    \
+		(ret1) = imfs_close(CAGE_ID, imfd); \
+		(ret2) = close(afd);                \
+	} while (0)
+
+#define WRITE(imfd, afd, buf, len, ret1, ret2)        \
+	do {                                              \
+		(ret1) = imfs_write(CAGE_ID, imfd, buf, len); \
+		(ret2) = write(afd, buf, len);                \
+	} while (0)
+
+#define READ(imfd, afd, buf1, buf2, len, ret1, ret2)  \
+	do {                                              \
+		(ret1) = imfs_read(CAGE_ID, imfd, buf1, len); \
+		(ret2) = read(afd, buf2, len);                \
+	} while (0)
+
+#define MKDIR(path, mode, ret1, ret2)             \
+	do {                                          \
+		(ret1) = imfs_mkdir(CAGE_ID, path, mode); \
+		(ret2) = mkdir(path, mode);               \
+	} while (0)
+
+#define UNLINK(path, ret1, ret2)             \
+	do {                                     \
+		(ret1) = imfs_unlink(CAGE_ID, path); \
+		(ret2) = unlink(path);               \
+	} while (0)
+
+#define LSEEK(imfd, afd, offset, whence, ret1, ret2)        \
+	do {                                                    \
+		(ret1) = imfs_lseek(CAGE_ID, imfd, offset, whence); \
+		(ret2) = lseek(afd, offset, whence);                \
+	} while (0)
+
+#define DUP(imfd, afd, ret1, ret2)        \
+	do {                                  \
+		(ret1) = imfs_dup(CAGE_ID, imfd); \
+		(ret2) = dup(afd);                \
+	} while (0)
+
+#define DUP2(imfd, afd, newfd1, newfd2, ret1, ret2) \
+	do {                                            \
+		(ret1) = imfs_dup2(CAGE_ID, imfd, newfd1);  \
+		(ret2) = dup2(afd, newfd2);                 \
+	} while (0)
 
 struct Test {
 	char *name;
@@ -32,7 +81,7 @@ typedef int (*TestFunc)(void);
 void
 load_folder(char *path)
 {
-	MKDIR(path, 0);
+	imfs_mkdir(CAGE_ID, path, 0);
 
 	DIR *dir = opendir(path);
 	struct dirent *entry;
@@ -55,16 +104,16 @@ load_folder(char *path)
 			if (!fp)
 				continue;
 
-			int imfs_fd = OPEN(fullpath, O_CREAT | O_WRONLY, 0);
+			int imfs_fd = imfs_open(CAGE_ID, fullpath, O_CREAT | O_WRONLY, 0);
 
 			char buffer[1024];
 			size_t nread;
 			while ((nread = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
-				WRITE(imfs_fd, buffer, nread);
+				imfs_write(CAGE_ID, imfs_fd, buffer, nread);
 			}
 
 			fclose(fp);
-			CLOSE(imfs_fd);
+			imfs_close(CAGE_ID, imfs_fd);
 		} else {
 			load_folder(fullpath);
 		}
@@ -74,12 +123,13 @@ load_folder(char *path)
 int
 test_imfs_open_exist()
 {
-	int fd = OPEN("/test_folder/hello.txt", O_RDONLY, 0);
+	int fd = imfs_open(CAGE_ID, "/test_folder/hello.txt", O_RDONLY, 0);
+
 	if (fd < 0) {
 		perror("");
 		return 1;
 	}
-	if (CLOSE(fd) != 0) {
+	if (imfs_close(CAGE_ID, fd) != 0) {
 		perror("");
 		return 1;
 	}
@@ -90,12 +140,12 @@ test_imfs_open_exist()
 int
 test_imfs_open_create()
 {
-	int fd = OPEN("/test_folder/file_imfs.txt", O_CREAT | O_WRONLY, 0);
+	int fd = imfs_open(CAGE_ID, "/test_folder/file_imfs.txt", O_CREAT | O_WRONLY, 0);
 	if (fd < 0) {
 		return 1;
 	}
 
-	if (CLOSE(fd) != 0) {
+	if (imfs_close(CAGE_ID, fd) != 0) {
 		return 1;
 	}
 
@@ -105,7 +155,7 @@ test_imfs_open_create()
 int
 test_imfs_openclose_invalid()
 {
-	int fd = OPEN("/test_folder/file_inexist.txt", O_RDONLY, 0);
+	int fd = imfs_open(CAGE_ID, "/test_folder/file_inexist.txt", O_RDONLY, 0);
 	if (fd > 0) {
 		return 1;
 	}
@@ -114,21 +164,68 @@ test_imfs_openclose_invalid()
 }
 
 int
+test_dup()
+{
+	int fd, afd;
+	OPEN("test_folder/hello.txt", O_RDONLY, 0644, fd, afd);
+
+	if (fd < 0 || afd < 0)
+		return 1;
+
+	int d_fd, ad_fd;
+	DUP(fd, afd, d_fd, ad_fd);
+
+	if (d_fd < 0 || ad_fd < 0)
+		return 1;
+
+	char first[5], a_first[5];
+	char second[5], a_second[5];
+
+	int ret1, ret2;
+	READ(fd, afd, first, a_first, 5, ret1, ret2);
+
+	if (ret1 != ret2)
+		return 1;
+
+	if (strncmp(a_first, first, 5))
+		return 1;
+
+	READ(d_fd, ad_fd, second, a_second, 5, ret1, ret2);
+
+	if (ret1 != ret2)
+		return 1;
+
+	if (strncmp(a_second, second, 5))
+		return 1;
+
+	return 0;
+}
+
+int
 test_read()
 {
-	int fd = OPEN("/test_folder/hello.txt", O_RDONLY, 0);
+	int fd, afd;
+	OPEN("test_folder/hello.txt", O_RDONLY, 0644, fd, afd);
 
 	if (fd < 0)
 		return 1;
 
-	char buf[7];
+	char buf1[7] = "", buf2[7] = "";
 
-	READ(fd, buf, 7);
+	int ret1, ret2;
 
-	if (strcmp("hello\n", buf) != 0)
+	READ(fd, afd, buf1, buf2, 7, ret1, ret2);
+
+	if (ret1 != ret2)
 		return 1;
 
-	CLOSE(fd);
+	if (strncmp(buf1, buf2, 7))
+		return 1;
+
+	CLOSE(fd, afd, ret1, ret2);
+	if (ret1 != ret2)
+		return 1;
+
 	return 0;
 }
 
@@ -136,26 +233,21 @@ int
 test_write()
 {
 	char *buf = "hello world";
-	int fd = OPEN("/test_folder/file_new.txt", O_CREAT | O_WRONLY, 0);
-	if (fd < 0)
+	int fd, afd;
+
+	OPEN("test_folder/test_write.txt", O_CREAT | O_WRONLY, 0644, fd, afd);
+
+	if (afd == -1 || fd == -1)
 		return 1;
 
-	if (WRITE(fd, buf, 12) <= 0)
+	int ret1, ret2;
+
+	WRITE(fd, afd, buf, 10, ret1, ret2);
+
+	if (ret1 != ret2)
 		return 1;
 
-	CLOSE(fd);
-
-	fd = OPEN("/test_folder/file_new.txt", O_RDONLY, 0);
-
-	char readbuf[12];
-	if (READ(fd, readbuf, 12) <= 0)
-		return 1;
-
-	if (strcmp(buf, readbuf) != 0)
-		return 1;
-
-	CLOSE(fd);
-
+	CLOSE(fd, afd, ret1, ret2);
 	return 0;
 }
 
@@ -200,6 +292,7 @@ main(int argc, char *argv[])
 	run_test("Invalid path.", "open", test_imfs_openclose_invalid);
 	run_test("Valid path.", "read", test_read);
 	run_test("Valid path.", "write", test_write);
+	run_test("dup reads.", "dup", test_dup);
 
 	printf("Passed: %d\n", passed);
 	printf("Failed: %d\n", failed);
