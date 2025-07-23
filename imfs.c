@@ -184,18 +184,18 @@ imfs_allocate_fd(int cage_id, Node *node)
 	return i;
 }
 
-static int 
+static int
 imfs_allocate_fd_dup(int cage_id, int oldfd, int newfd)
 {
-	if(newfd == oldfd)
+	if (newfd == oldfd)
 		return newfd;
 
-	int i=3;
-	if(newfd != -1) {
-		i = newfd;	
+	int i = 3;
+	if (newfd != -1) {
+		i = newfd;
 		goto allocate;
 	}
-	
+
 	while (g_fdtable[cage_id][i].node != NULL || g_fdtable[cage_id][i].link != NULL)
 		i++;
 
@@ -206,22 +206,22 @@ imfs_allocate_fd_dup(int cage_id, int oldfd, int newfd)
 
 allocate:
 
-	if(g_fdtable[cage_id][i].node || g_fdtable[cage_id][i].link)
+	if (g_fdtable[cage_id][i].node || g_fdtable[cage_id][i].link)
 		imfs_close(cage_id, i);
 
 	g_fdtable[cage_id][i] = (FileDesc) {
-		.link = &g_fdtable[cage_id][oldfd], 
-		.node = NULL, 
+		.link = &g_fdtable[cage_id][oldfd],
+		.node = NULL,
 		.offset = 0,
 	};
-	
+
 	return i;
 }
 
-static FileDesc*
+static FileDesc *
 get_filedesc(int cage_id, int fd)
 {
-	if(g_fdtable[cage_id][fd].link)
+	if (g_fdtable[cage_id][fd].link)
 		return g_fdtable[cage_id][fd].link;
 
 	return &g_fdtable[cage_id][fd];
@@ -461,6 +461,12 @@ imfs_open(int cage_id, const char *path, int flags, mode_t mode)
 }
 
 int
+imfs_creat(int cage_id, const char *path, mode_t mode)
+{
+	return imfs_open(cage_id, path, O_WRONLY | O_CREAT | O_TRUNC, mode);
+}
+
+int
 imfs_close(int cage_id, int fd)
 {
 	if (fd < 0 || fd >= MAX_FDS || !g_fdtable[cage_id][fd].node) {
@@ -480,10 +486,15 @@ imfs_close(int cage_id, int fd)
 }
 
 ssize_t
-imfs_write(int cage_id, int fd, const void *buf, size_t count)
+__imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_t offset)
 {
 	if (fd < 0 || fd >= MAX_FDS) {
 		errno = EBADF;
+		return -1;
+	}
+
+	if (offset < 0) {
+		errno = EINVAL;
 		return -1;
 	}
 
@@ -503,19 +514,40 @@ imfs_write(int cage_id, int fd, const void *buf, size_t count)
 		node->size = new_size;
 	}
 
+	off_t use_offset = pread ? offset : fdesc->offset;
+
 	mem_cpy(node->r_data + fdesc->offset, buf, count);
-	fdesc->offset += count;
+
+	if (!pread)
+		fdesc->offset += count;
 
 	return count;
 }
 
 ssize_t
-imfs_read(int cage_id, int fd, void *buf, size_t count)
+imfs_write(int cage_id, int fd, const void *buf, size_t count)
+{
+	return __imfs_write(cage_id, fd, buf, count, 0, 0);
+}
+
+ssize_t
+imfs_pwrite(int cage_id, int fd, const void *buf, size_t count, off_t offset)
+{
+	return __imfs_write(cage_id, fd, buf, count, 1, offset);
+}
+
+static ssize_t
+__imfs_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t offset)
 {
 	FileDesc *c_fd = get_filedesc(cage_id, fd);
 
-	if (fd < 0 || fd >= MAX_FDS || !c_fd->node || !buf) {
+	if (fd < 0 || fd >= MAX_FDS || !c_fd->node || !buf || offset < 0) {
 		errno = EBADF;
+		return -1;
+	}
+
+	if (offset < 0) {
+		errno = EINVAL;
 		return -1;
 	}
 
@@ -533,10 +565,25 @@ imfs_read(int cage_id, int fd, void *buf, size_t count)
 	size_t available = node->size - c_fd->offset;
 	size_t to_read = count < available ? count : available;
 
-	mem_cpy(buf, node->r_data + c_fd->offset, to_read);
-	c_fd->offset += to_read;
+	off_t use_offset = pread ? offset : c_fd->offset;
+
+	mem_cpy(buf, node->r_data + use_offset, to_read);
+	if (!pread)
+		c_fd->offset += to_read;
 
 	return to_read;
+}
+
+ssize_t
+imfs_read(int cage_id, int fd, void *buf, size_t count)
+{
+	return __imfs_read(cage_id, fd, buf, count, 0, 0);
+}
+
+ssize_t
+imfs_pread(int cage_id, int fd, void *buf, size_t count, off_t offset)
+{
+	return __imfs_read(cage_id, fd, buf, count, 1, offset);
 }
 
 int
@@ -688,7 +735,7 @@ off_t
 imfs_lseek(int cage_id, int fd, off_t offset, int whence)
 {
 	FileDesc *fdesc = get_filedesc(cage_id, fd);
-	
+
 	if (!fdesc->node) {
 		errno = EBADF;
 		return -1;
@@ -727,7 +774,7 @@ imfs_lseek(int cage_id, int fd, off_t offset, int whence)
 	return ret;
 }
 
-int 
+int
 imfs_dup(int cage_id, int fd)
 {
 	return imfs_allocate_fd_dup(cage_id, fd, -1);
@@ -760,10 +807,10 @@ main()
 
 	fd = imfs_open(cage_id, "/firstfile.txt", O_RDONLY, 0);
 	int newfd = imfs_dup(cage_id, fd);
-	
+
 	char *readbuf;
 	char *dupbuf;
-	for(int i=0;i<11;i++) {
+	for (int i = 0; i < 11; i++) {
 		imfs_read(cage_id, fd, readbuf, 1);
 		imfs_read(cage_id, newfd, dupbuf, 1);
 	}

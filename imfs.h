@@ -67,6 +67,7 @@ typedef struct FileDesc {
 
 int imfs_open(int cage_id, const char *path, int flags, mode_t mode);
 int imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode);
+int imfs_creat(int cage_id, const char *path, mode_t mode);
 ssize_t imfs_read(int cage_id, int fd, void *buf, size_t count);
 ssize_t imfs_write(int cage_id, int fd, const void *buf, size_t count);
 int imfs_close(int cage_id, int fd);
@@ -80,5 +81,8 @@ int imfs_unlink(int cage_id, const char *path);
 off_t imfs_lseek(int cage_id, int fd, off_t offset, int whence);
 int imfs_dup(int cage_id, int oldfd);
 int imfs_dup2(int cage_id, int oldfd, int newfd);
+
+ssize_t imfs_pwrite(int cage_id, int fd, const void *buf, size_t count, off_t offset);
+ssize_t imfs_pread(int cage_id, int fd, void *buf, size_t count, off_t offset);
 
 void imfs_init();
