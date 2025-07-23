@@ -23,6 +23,10 @@ static int g_free_list_size = -1;
 
 static Node *g_root_node = NULL;
 
+static int g_next_fd[MAX_PROCS];
+static int g_fd_free_list[MAX_PROCS][MAX_FDS];
+static int g_fd_free_list_size[MAX_PROCS] = { -1 };
+
 //
 // String Utils
 //
@@ -164,9 +168,12 @@ imfs_allocate_fd(int cage_id, Node *node)
 	if (!node)
 		return -1;
 
-	int i = 3;
-	while (g_fdtable[cage_id][i].node != NULL || g_fdtable[cage_id][i].link != NULL)
-		i++;
+	int i;
+	if (g_fd_free_list_size[cage_id] > -1) {
+		i = g_fd_free_list[cage_id][g_fd_free_list_size[cage_id]--];
+	} else {
+		i = g_next_fd[cage_id]++;
+	}
 
 	if (i == MAX_FDS) {
 		errno = EMFILE;
@@ -367,6 +374,14 @@ imfs_init()
 		};
 	}
 
+	for (int i = 0; i < MAX_PROCS; i++) {
+		g_fd_free_list_size[i] = -1;
+	}
+
+	for (int i = 0; i < MAX_PROCS; i++) {
+		g_next_fd[i] = 3;
+	}
+
 	g_root_node = imfs_create_node("/", M_DIR);
 	g_root_node->parent = g_root_node;
 
@@ -476,6 +491,8 @@ imfs_close(int cage_id, int fd)
 
 	FileDesc *fdesc = get_filedesc(cage_id, fd);
 	fdesc->node->in_use--;
+
+	g_fd_free_list[cage_id][++g_fd_free_list_size[cage_id]] = fd;
 
 	*fdesc = (FileDesc) {
 		.node = NULL,
@@ -798,22 +815,13 @@ main()
 	printf("IMFS init...\n");
 	int cage_id = 0;
 
-	printf("[write]\n");
-	int fd = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0);
-	printf("fd: %d\n", fd);
-	char *buf = "hello world";
-	imfs_write(cage_id, fd, buf, 11);
-	imfs_close(cage_id, fd);
+	int fd_1 = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0644);
+	int fd_2 = imfs_open(cage_id, "/secondfile.txt", O_CREAT | O_WRONLY, 0644);
+	int fd_3 = imfs_open(cage_id, "/thirdfile.txt", O_CREAT | O_WRONLY, 0644);
 
-	fd = imfs_open(cage_id, "/firstfile.txt", O_RDONLY, 0);
-	int newfd = imfs_dup(cage_id, fd);
+	imfs_close(cage_id, fd_2);
 
-	char *readbuf;
-	char *dupbuf;
-	for (int i = 0; i < 11; i++) {
-		imfs_read(cage_id, fd, readbuf, 1);
-		imfs_read(cage_id, newfd, dupbuf, 1);
-	}
+	int fd_4 = imfs_open(cage_id, "/fourthfile.txt", O_CREAT | O_WRONLY, 0644);
 
 	return 0;
 }
