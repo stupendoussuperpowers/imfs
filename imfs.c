@@ -1,8 +1,11 @@
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 
+#include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <unistd.h>
 
 #include "imfs.h"
@@ -33,6 +36,16 @@ static Node *g_root_node = NULL;
 //
 // String Utils
 //
+
+static size_t
+str_len(const char *name)
+{
+	int i = 0;
+	while (name[i] != '\0') {
+		i++;
+	}
+	return i;
+}
 
 static char *
 str_rchr(const char *s, const char c)
@@ -132,7 +145,7 @@ mem_cpy(void *dst, const void *src, size_t n)
 //
 
 static Node *
-imfs_create_node(const char *name, NodeType type)
+imfs_create_node(const char *name, NodeType type, mode_t mode)
 {
 	if (g_free_list_size == -1 && g_next_node >= MAX_NODES) {
 		errno = ENOMEM;
@@ -159,6 +172,7 @@ imfs_create_node(const char *name, NodeType type)
 	node->d_children = NULL;
 	node->r_data = NULL;
 	node->parent = NULL;
+	node->mode = mode;
 
 	str_ncopy(node->name, name, MAX_NODE_NAME - 1);
 	node->name[MAX_NODE_NAME - 1] = '\0';
@@ -206,8 +220,12 @@ imfs_allocate_fd_dup(int cage_id, int oldfd, int newfd)
 		goto allocate;
 	}
 
-	while (g_fdtable[cage_id][i].node != NULL || g_fdtable[cage_id][i].link != NULL)
-		i++;
+	int i;
+	if (g_fd_free_list_size[cage_id] > -1) {
+		i = g_fd_free_list[cage_id][g_fd_free_list_size[cage_id]--];
+	} else {
+		i = g_next_fd[cage_id]++;
+	}
 
 	if (i == MAX_FDS) {
 		errno = EMFILE;
@@ -354,6 +372,102 @@ imfs_remove_link(Node *node)
 	return 0;
 }
 
+static ssize_t
+__imfs_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t offset)
+{
+	FileDesc *c_fd = get_filedesc(cage_id, fd);
+
+	if (fd < 0 || fd >= MAX_FDS || !c_fd->node || !buf || offset < 0) {
+		errno = EBADF;
+		return -1;
+	}
+
+	if (offset < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	Node *node = c_fd->node;
+
+	if (node->type != M_REG) {
+		errno = EISDIR;
+		return -1;
+	}
+
+	if (c_fd->offset >= node->size) {
+		return 0;
+	}
+
+	size_t available = node->size - c_fd->offset;
+	size_t to_read = count < available ? count : available;
+
+	off_t use_offset = pread ? offset : c_fd->offset;
+
+	mem_cpy(buf, node->r_data + use_offset, to_read);
+	if (!pread)
+		c_fd->offset += to_read;
+
+	return to_read;
+}
+
+static ssize_t
+__imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_t offset)
+{
+	if (fd < 0 || fd >= MAX_FDS) {
+		errno = EBADF;
+		return -1;
+	}
+
+	if (offset < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	FileDesc *fdesc = get_filedesc(cage_id, fd);
+
+	Node *node = fdesc->node;
+	if (node->type != M_REG) {
+		errno = EISDIR;
+		return -1;
+	}
+
+	size_t new_size = fdesc->offset + count;
+	if (new_size > node->size) {
+		char *new_data = realloc(node->r_data, new_size);
+
+		node->r_data = new_data;
+		node->size = new_size;
+	}
+
+	off_t use_offset = pread ? offset : fdesc->offset;
+
+	mem_cpy(node->r_data + fdesc->offset, buf, count);
+
+	if (!pread)
+		fdesc->offset += count;
+
+	return count;
+}
+
+static int
+__imfs_stat(int cage_id, Node *node, struct stat *statbuf)
+{
+	*statbuf = (struct stat) {
+		.st_dev = GET_DEV,
+		.st_ino = node->index,
+		.st_mode = node->mode,
+		.st_nlink = 1,
+		.st_uid = GET_UID,
+		.st_gid = GET_GID,
+		.st_rdev = 0,
+		.st_size = node->size,
+		.st_blksize = 512,
+		.st_blocks = node->size / 512,
+	};
+
+	return 0;
+}
+
 void
 imfs_init()
 {
@@ -374,6 +488,7 @@ imfs_init()
 			.d_count = 0,
 			.size = 0,
 			.info = NULL,
+			.mode = 0,
 		};
 	}
 
@@ -385,15 +500,15 @@ imfs_init()
 		g_next_fd[i] = 3;
 	}
 
-	g_root_node = imfs_create_node("/", M_DIR);
+	g_root_node = imfs_create_node("/", M_DIR, 0755);
 	g_root_node->parent = g_root_node;
 
-	Node *dot = imfs_create_node(".", M_LNK);
+	Node *dot = imfs_create_node(".", M_LNK, 0);
 	if (!dot)
 		exit(1);
 	dot->l_link = g_root_node;
 
-	Node *dotdot = imfs_create_node("..", M_LNK);
+	Node *dotdot = imfs_create_node("..", M_LNK, 0);
 	if (!dotdot)
 		exit(1);
 
@@ -446,7 +561,7 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 			return -1;
 		}
 
-		node = imfs_create_node(filename, M_REG);
+		node = imfs_create_node(filename, M_REG, mode);
 		if (!node) {
 			return -1;
 		}
@@ -466,6 +581,31 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 		if (node->type == M_DIR && !(flags & O_DIRECTORY)) {
 			errno = EISDIR;
 			return -1;
+		}
+
+		// Check for file access based on flags and mode.
+
+		switch (O_ACCMODE & flags) {
+		case O_RDONLY:
+			if (!(node->mode & S_IROTH)) {
+				errno = EACCES;
+				return -1;
+			}
+			break;
+		case O_RDWR:
+			if (!(node->mode & S_IWOTH) || !(node->mode & S_IROTH)) {
+				errno = EACCES;
+				return -1;
+			}
+			break;
+		case O_WRONLY:
+			if (!(node->mode & S_IWOTH)) {
+				errno = EACCES;
+				return -1;
+			}
+			break;
+		default:
+			break;
 		}
 	}
 
@@ -506,45 +646,6 @@ imfs_close(int cage_id, int fd)
 }
 
 ssize_t
-__imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_t offset)
-{
-	if (fd < 0 || fd >= MAX_FDS) {
-		errno = EBADF;
-		return -1;
-	}
-
-	if (offset < 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	FileDesc *fdesc = get_filedesc(cage_id, fd);
-
-	Node *node = fdesc->node;
-	if (node->type != M_REG) {
-		errno = EISDIR;
-		return -1;
-	}
-
-	size_t new_size = fdesc->offset + count;
-	if (new_size > node->size) {
-		char *new_data = realloc(node->r_data, new_size);
-
-		node->r_data = new_data;
-		node->size = new_size;
-	}
-
-	off_t use_offset = pread ? offset : fdesc->offset;
-
-	mem_cpy(node->r_data + fdesc->offset, buf, count);
-
-	if (!pread)
-		fdesc->offset += count;
-
-	return count;
-}
-
-ssize_t
 imfs_write(int cage_id, int fd, const void *buf, size_t count)
 {
 	return __imfs_write(cage_id, fd, buf, count, 0, 0);
@@ -554,44 +655,6 @@ ssize_t
 imfs_pwrite(int cage_id, int fd, const void *buf, size_t count, off_t offset)
 {
 	return __imfs_write(cage_id, fd, buf, count, 1, offset);
-}
-
-static ssize_t
-__imfs_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t offset)
-{
-	FileDesc *c_fd = get_filedesc(cage_id, fd);
-
-	if (fd < 0 || fd >= MAX_FDS || !c_fd->node || !buf || offset < 0) {
-		errno = EBADF;
-		return -1;
-	}
-
-	if (offset < 0) {
-		errno = EINVAL;
-		return -1;
-	}
-
-	Node *node = c_fd->node;
-
-	if (node->type != M_REG) {
-		errno = EISDIR;
-		return -1;
-	}
-
-	if (c_fd->offset >= node->size) {
-		return 0;
-	}
-
-	size_t available = node->size - c_fd->offset;
-	size_t to_read = count < available ? count : available;
-
-	off_t use_offset = pread ? offset : c_fd->offset;
-
-	mem_cpy(buf, node->r_data + use_offset, to_read);
-	if (!pread)
-		c_fd->offset += to_read;
-
-	return to_read;
 }
 
 ssize_t
@@ -633,7 +696,7 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 		return -1;
 	}
 
-	Node *node = imfs_create_node(filename, M_DIR);
+	Node *node = imfs_create_node(filename, M_DIR, mode);
 	if (!node) {
 		return -1;
 	}
@@ -644,12 +707,12 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 		return -1;
 	}
 
-	Node *dot = imfs_create_node(".", M_LNK);
+	Node *dot = imfs_create_node(".", M_LNK, 0);
 	if (!dot)
 		return -1;
 	dot->l_link = node;
 
-	Node *dotdot = imfs_create_node("..", M_LNK);
+	Node *dotdot = imfs_create_node("..", M_LNK, 0);
 	if (!dotdot)
 		return -1;
 
@@ -693,7 +756,7 @@ imfs_linkat(int cage_id, int olddirfd, const char *oldpath, int newdirfd, const 
 	char *filename = namecomp[count - 1];
 
 	Node *newnode_parent = imfs_find_node_namecomp(cage_id, newdirfd, namecomp, count - 1);
-	newnode = imfs_create_node(filename, M_LNK);
+	newnode = imfs_create_node(filename, M_LNK, 0);
 
 	newnode->l_link = oldnode;
 
@@ -806,6 +869,91 @@ imfs_dup2(int cage_id, int oldfd, int newfd)
 	return imfs_allocate_fd_dup(cage_id, oldfd, newfd);
 }
 
+int
+imfs_lstat(int cage_id, const char *pathname, struct stat *statbuf)
+{
+	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
+	return __imfs_stat(cage_id, node, statbuf);
+}
+
+int
+imfs_stat(int cage_id, const char *pathname, struct stat *statbuf)
+{
+	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
+	if (node->type == M_LNK)
+		return __imfs_stat(cage_id, node->l_link, statbuf);
+	return __imfs_stat(cage_id, node, statbuf);
+}
+
+int
+imfs_fstat(int cage_id, int fd, struct stat *statbuf)
+{
+	Node *node = get_filedesc(cage_id, fd)->node;
+	if (node->type == M_LNK)
+		return __imfs_stat(cage_id, node->l_link, statbuf);
+	return __imfs_stat(cage_id, node, statbuf);
+}
+
+I_DIR *
+imfs_opendir(int cage_id, const char *name)
+{
+	I_DIR *dirstream;
+	int fd = imfs_open(cage_id, name, O_DIRECTORY, 0);
+	Node *node = get_filedesc(cage_id, fd)->node;
+
+	*dirstream = (I_DIR) {
+		.fd = fd,
+		.node = node,
+		.size = 0,
+		.offset = 0,
+		.filepos = 0,
+	};
+
+	return dirstream;
+}
+
+struct dirent *
+imfs_readdir(int cage_id, I_DIR *dirstream)
+{
+	struct dirent *ret = malloc(sizeof(struct dirent));
+
+	Node *dirnode = dirstream->node;
+
+	if (dirstream->offset >= dirnode->d_count) {
+		return NULL;
+	}
+
+	// Next entry
+
+	struct DirEnt nextentry = dirnode->d_children[dirstream->offset++];
+
+	int ino = nextentry.node->index;
+	int _type = nextentry.node->type;
+	size_t namelen = str_len(nextentry.name);
+
+	*ret = (struct dirent) {
+		.d_ino = ino,		 // 8
+		.d_reclen = 32,		 // 24
+		.d_namlen = namelen, // 32 + X
+		.d_type = _type,	 // 36 + X
+	};
+
+	printf("ino %d\n", sizeof(ino_t));
+	printf("off %d\n", sizeof(off_t));
+	printf("reclen %d\n", sizeof(unsigned short));
+	printf("type %d\n", sizeof(unsigned char));
+
+	printf("\n%d\n", sizeof(__uint64_t));
+	printf("%d\n", sizeof(__uint16_t));
+	printf("%d\n", sizeof(__uint16_t));
+	printf("%d\n", sizeof(__uint8_t));
+
+	str_ncopy(ret->d_name, nextentry.name, namelen);
+	ret->d_name[namelen + 1] = '\0';
+
+	return ret;
+}
+
 //
 // Main func for local testing.
 //
@@ -818,13 +966,16 @@ main()
 	printf("IMFS init...\n");
 	int cage_id = 0;
 
-	int fd_1 = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0644);
-	int fd_2 = imfs_open(cage_id, "/secondfile.txt", O_CREAT | O_WRONLY, 0644);
-	int fd_3 = imfs_open(cage_id, "/thirdfile.txt", O_CREAT | O_WRONLY, 0644);
+	int fd = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0644);
+	imfs_close(cage_id, fd);
 
-	imfs_close(cage_id, fd_2);
+	I_DIR *dirstream = imfs_opendir(cage_id, "/");
 
-	int fd_4 = imfs_open(cage_id, "/fourthfile.txt", O_CREAT | O_WRONLY, 0644);
+	struct dirent *entry;
+
+	while ((entry = imfs_readdir(cage_id, dirstream)) != NULL) {
+		printf("%s\n", entry->d_name);
+	}
 
 	return 0;
 }

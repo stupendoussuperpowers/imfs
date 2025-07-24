@@ -1,30 +1,35 @@
 ## In Memory File System
 
-Emulate a POSIX-compliant FS interface with nodes stored in memory. 
+[![Make Tests](https://github.com/stupendoussuperpowers/imfs/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/stupendoussuperpowers/imfs/actions/workflows/tests.yml)
 
-Building
---- 
+Emulate a POSIX-compliant FS interface with nodes stored in memory.
+
+[Reference](https://github.com/Lind-Project/lind-wasm/issues/304#issuecomment-3097608727)
+
+### Building
 
 To build as a library:
 
-make lib 
+`make lib`
 
 To build with the main function:
 
-make imfs
+`make imfs`
 
-To build and run tests: 
+To build and run tests:
 
-make test				# Run all tests
-make test-<prefix>		# Run all tests in the group starting with the prefix
+```
+make test           #Run all tests
+make test-<prefix>  #Run all tests in the group starting with the prefix
+```
 
 Make imfs with debug symbols:
 
-make debug
+`make debug`
 
-Implemented FS Functions
---- 
+### Implemented FS Functions
 
+```
 int imfs_open(int cage_id, const char *path, int flags, mode_t mode);
 int imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode);
 int imfs_creat(int cage_id, const char *path, mode_t mode);
@@ -50,3 +55,8 @@ off_t imfs_lseek(int cage_id, int fd, off_t offset, int whence);
 
 int imfs_dup(int cage_id, int oldfd);
 int imfs_dup2(int cage_id, int oldfd, int newfd);
+
+int imfs_lstat(int cage_id, const char *pathname, struct stat *statbuf);
+int imfs_stat(int cage_id, const char *pathname, struct stat *statbuf);
+int imfs_fstat(int cage_id, int fd, struct stat *statbuf);
+```
