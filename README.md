@@ -59,4 +59,10 @@ int imfs_dup2(int cage_id, int oldfd, int newfd);
 int imfs_lstat(int cage_id, const char *pathname, struct stat *statbuf);
 int imfs_stat(int cage_id, const char *pathname, struct stat *statbuf);
 int imfs_fstat(int cage_id, int fd, struct stat *statbuf);
+
+ssize_t imfs_readv(int cage_id, int fd, const struct iovec *iov, int count);
+ssize_t imfs_preadv(int cage_id, int fd, const struct iovec *iov, int count, off_t offset);
+ssize_t imfs_writev(int cage_id, int fd, const struct iovec *iov, int count);
+ssize_t imfs_pwritev(int cage_id, int fd, const struct iovec *iov, int count, off_t offset);
+
 ```

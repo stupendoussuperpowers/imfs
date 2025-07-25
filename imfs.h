@@ -4,6 +4,12 @@
 #include <fcntl.h>
 #include <stddef.h>
 
+#ifdef DIAG
+#define LOG(...) printf(__VA_ARGS)
+#else
+#define LOG(...) ((void)0);
+#endif
+
 #define MAX_NODE_NAME 64
 #define MAX_NODE_SIZE 4096
 #define MAX_FDS		  1024
@@ -110,5 +116,10 @@ int imfs_fstat(int cage_id, int fd, struct stat *statbuf);
 
 I_DIR *imfs_opendir(int cage_id, const char *name);
 struct dirent *imfs_readdir(int cage_id, I_DIR *dirstream);
+
+ssize_t imfs_readv(int cage_id, int fd, const struct iovec *iov, int count);
+ssize_t imfs_preadv(int cage_id, int fd, const struct iovec *iov, int count, off_t offset);
+ssize_t imfs_writev(int cage_id, int fd, const struct iovec *iov, int count);
+ssize_t imfs_pwritev(int cage_id, int fd, const struct iovec *iov, int count, off_t offset);
 
 void imfs_init();
