@@ -116,7 +116,7 @@ load_folder(char *path)
 			if (!fp)
 				continue;
 
-			int imfs_fd = imfs_open(CAGE_ID, fullpath, O_CREAT | O_WRONLY, 0);
+			int imfs_fd = imfs_open(CAGE_ID, fullpath, O_CREAT | O_WRONLY, st.st_mode);
 
 			char buffer[1024];
 			size_t nread;
@@ -138,7 +138,7 @@ test_imfs_open_exist()
 	int fd = imfs_open(CAGE_ID, "/test_folder/hello.txt", O_RDONLY, 0);
 
 	if (fd < 0) {
-		perror("");
+		perror("imfs_open: ");
 		return 1;
 	}
 	if (imfs_close(CAGE_ID, fd) != 0) {
@@ -275,7 +275,7 @@ test_write()
 	char *buf = "hello world";
 	int fd, afd;
 
-	OPEN("test_folder/test_write.txt", O_CREAT | O_WRONLY, 0644, fd, afd);
+	OPEN("test_folder/test_write.txt", O_WRONLY, 0644, fd, afd);
 
 	if (afd == -1 || fd == -1)
 		return 1;
@@ -308,17 +308,12 @@ test_pwrite()
 	PWRITE(fd, afd, hello, 5, 0, ret1, ret2);
 	PWRITE(fd, afd, world, 5, 0, ret1, ret2);
 
-	printf("%d | %d \n", ret1, ret2);
-
 	if (ret1 != ret2)
 		return 1;
 
 	char buf1[5], buf2[5];
 	READ(fd, afd, buf1, buf2, 5, ret1, ret2);
 
-	printf("%d | %d \n", ret1, ret2);
-
-	printf("%s | %s \n", buf1, buf2);
 	if (ret1 != ret2)
 		return 1;
 

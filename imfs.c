@@ -123,10 +123,6 @@ str_ncopy(char *dst, const char *src, int n)
 	for (i = 0; i < n && src[i] != '\0'; i++) {
 		dst[i] = src[i];
 	}
-
-	for (i = 0; i < n; i++) {
-		dst[i] = '\0';
-	}
 }
 
 static void
@@ -1009,7 +1005,7 @@ main()
 	LOG("[imfs] Init...\n");
 	int cage_id = 0;
 
-	int fd = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0644);
+	int fd = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0666);
 	imfs_close(cage_id, fd);
 
 	I_DIR *dirstream = imfs_opendir(cage_id, "/");
