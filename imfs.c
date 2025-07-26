@@ -169,7 +169,7 @@ imfs_create_node(const char *name, NodeType type, mode_t mode)
 	node->d_children = NULL;
 	node->r_data = NULL;
 	node->parent = NULL;
-	node->mode = mode;
+	node->mode = node->type | (mode & 0777);
 
 	str_ncopy(node->name, name, MAX_NODE_NAME - 1);
 	node->name[MAX_NODE_NAME - 1] = '\0';
@@ -336,10 +336,14 @@ add_child(Node *parent, Node *node)
 static int
 imfs_remove_file(Node *node)
 {
-	g_free_list[++g_free_list_size] = node->index;
-	node->type = M_NON;
-
 	node->parent->d_count--;
+	node->doomed = 1;
+
+	if (!node->in_use) {
+		g_free_list[++g_free_list_size] = node->index;
+		node->type = M_NON;
+	}
+
 	return 0;
 }
 
@@ -351,19 +355,25 @@ imfs_remove_dir(Node *node)
 		return -1;
 	}
 
-	g_free_list[++g_free_list_size] = node->index;
-	node->type = M_NON;
+	if (!node->in_use) {
+		g_free_list[++g_free_list_size] = node->index;
+		node->type = M_NON;
+	}
 
 	node->parent->d_count--;
+	node->doomed = 1;
 	return 0;
 }
 
 static int
 imfs_remove_link(Node *node)
 {
-	g_free_list[++g_free_list_size] = node->index;
-	node->type = M_NON;
+	if (!node->in_use) {
+		g_free_list[++g_free_list_size] = node->index;
+		node->type = M_NON;
+	}
 
+	node->doomed = 1;
 	node->parent->d_count--;
 	return 0;
 }
@@ -477,6 +487,8 @@ __imfs_writev(int cage_id, int fd, const struct iovec *iov, int count, off_t off
 static int
 __imfs_stat(int cage_id, Node *node, struct stat *statbuf)
 {
+	if (node == NULL)
+		return -1;
 	*statbuf = (struct stat) {
 		.st_dev = GET_DEV,
 		.st_ino = node->index,
@@ -598,7 +610,7 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 		}
 	} else {
 		// File Exists
-		if (flags & O_EXCL && flags & O_CREAT) {
+		if (/*flags & O_EXCL ||*/ flags & O_CREAT) {
 			errno = EEXIST;
 			return -1;
 		}
@@ -659,6 +671,11 @@ imfs_close(int cage_id, int fd)
 
 	FileDesc *fdesc = get_filedesc(cage_id, fd);
 	fdesc->node->in_use--;
+
+	if (fdesc->node->doomed) {
+		fdesc->node->type = M_NON;
+		g_free_list[++g_free_list_size] = fdesc->node->index;
+	}
 
 	g_fd_free_list[cage_id][++g_fd_free_list_size[cage_id]] = fd;
 
@@ -772,12 +789,18 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 
 	dotdot->l_link = node->parent;
 
+	LOG("Created Node: \n");
+	LOG("Index: %d \n", node->index);
+	LOG("Name: %s\n", node->name);
+	LOG("Type: %d\n", node->type);
+
 	return 0;
 }
 
 int
 imfs_mkdir(int cage_id, const char *path, mode_t mode)
 {
+	LOG("Making dir. %s | %d \n", path, mode);
 	return imfs_mkdirat(cage_id, AT_FDCWD, path, mode);
 }
 
@@ -825,6 +848,26 @@ imfs_link(int cage_id, const char *oldpath, const char *newpath)
 }
 
 int
+imfs_symlink(int cage_id, const char *oldpath, const char *newpath)
+{
+	return imfs_linkat(cage_id, AT_FDCWD, oldpath, AT_FDCWD, newpath, 0);
+}
+
+int
+imfs_rename(int cage_id, const char *oldpath, const char *newpath)
+{
+	// TODO
+	return 0;
+}
+
+int
+imfs_chown(int cage_id, const char *pathname, uid_t owner, gid_t group)
+{
+	// TODO
+	return 0;
+}
+
+int
 imfs_remove(int cage_id, const char *pathname)
 {
 	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
@@ -834,10 +877,10 @@ imfs_remove(int cage_id, const char *pathname)
 		return -1;
 	}
 
-	if (node->in_use) {
-		errno = EBUSY;
-		return -1;
-	}
+	// if (node->in_use) {
+	// 	errno = EBUSY;
+	// 	return -1;
+	// }
 
 	switch (node->type) {
 	case M_DIR:
@@ -928,6 +971,7 @@ imfs_lstat(int cage_id, const char *pathname, struct stat *statbuf)
 int
 imfs_stat(int cage_id, const char *pathname, struct stat *statbuf)
 {
+	LOG("cage=%d pathname=%s\n", cage_id, pathname);
 	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
 	if (node->type == M_LNK)
 		return __imfs_stat(cage_id, node->l_link, statbuf);

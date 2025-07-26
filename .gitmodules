@@ -1,0 +1,3 @@
+[submodule "pjdfstest"]
+	path = pjdfstest
+	url = git@github.com:pjd/pjdfstest.git

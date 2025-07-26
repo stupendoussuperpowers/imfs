@@ -1,14 +1,15 @@
 
 #include <sys/types.h>
+#include <sys/stat.h>
 #include <sys/uio.h>
 
 #include <fcntl.h>
 #include <stddef.h>
 
 #ifdef DIAG
-#define LOG(...) printf(__VA_ARGS)
+#define LOG(...) printf(__VA_ARGS__)
 #else
-#define LOG(...) ((void)0);
+#define LOG(...) ((void)0)
 #endif
 
 #define MAX_NODE_NAME 64
@@ -25,11 +26,11 @@
 #define GET_DEV 1
 
 typedef enum {
-	M_REG,
-	M_DIR,
-	M_LNK,
+	M_REG = S_IFREG,
+	M_DIR = S_IFDIR,
+	M_LNK = S_IFLNK,
 	// Indicated free node
-	M_NON,
+	M_NON = 0,
 } NodeType;
 
 #define d_children info.dir.children
@@ -45,7 +46,7 @@ typedef struct Node {
 	char name[MAX_NODE_NAME]; /* File name */
 	struct Node *parent;	  /* Parent node */
 	int in_use;				  /* Number of FD's attached to this node */
-
+	int doomed;
 	mode_t mode;
 
 	union {
@@ -123,4 +124,8 @@ ssize_t imfs_preadv(int cage_id, int fd, const struct iovec *iov, int count, off
 ssize_t imfs_writev(int cage_id, int fd, const struct iovec *iov, int count);
 ssize_t imfs_pwritev(int cage_id, int fd, const struct iovec *iov, int count, off_t offset);
 
+int imfs_symlink(int cage_id, const char *oldpath, const char *newpath);
+int imfs_rename(int cage_id, const char *oldpath, const char *newpath);
+
+int imfs_chown(int cage_id, const char *pathname, uid_t owner, gid_t group);
 void imfs_init();
