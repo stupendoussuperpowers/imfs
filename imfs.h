@@ -1,5 +1,6 @@
 
 #include <sys/types.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <sys/uio.h>
 
@@ -48,6 +49,11 @@ typedef struct Node {
 	int in_use;				  /* Number of FD's attached to this node */
 	int doomed;
 	mode_t mode;
+
+	struct timespec atime;
+	struct timespec mtime;
+	struct timespec ctime;
+	struct timespec btime;
 
 	union {
 		// M_REG
@@ -128,4 +134,10 @@ int imfs_symlink(int cage_id, const char *oldpath, const char *newpath);
 int imfs_rename(int cage_id, const char *oldpath, const char *newpath);
 
 int imfs_chown(int cage_id, const char *pathname, uid_t owner, gid_t group);
+
+int imfs_mkfifo(int cage_id, const char *pathname, mode_t mode);
+int imfs_mknod(int cage_id, const char *pathname, mode_t mode, dev_t dev);
+
+int imfs_bind(int cage_id, int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
 void imfs_init();

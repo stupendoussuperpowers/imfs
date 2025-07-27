@@ -4,6 +4,7 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <time.h>
 #ifdef DIAG
 #include <stdio.h>
 #endif
@@ -171,6 +172,11 @@ imfs_create_node(const char *name, NodeType type, mode_t mode)
 	node->parent = NULL;
 	node->mode = node->type | (mode & 0777);
 
+	clock_gettime(CLOCK_REALTIME, &node->atime);
+	clock_gettime(CLOCK_REALTIME, &node->btime);
+	clock_gettime(CLOCK_REALTIME, &node->ctime);
+	clock_gettime(CLOCK_REALTIME, &node->mtime);
+
 	str_ncopy(node->name, name, MAX_NODE_NAME - 1);
 	node->name[MAX_NODE_NAME - 1] = '\0';
 	return node;
@@ -201,6 +207,8 @@ imfs_allocate_fd(int cage_id, Node *node)
 	};
 
 	node->in_use++;
+
+	clock_gettime(CLOCK_REALTIME, &node->atime);
 
 	return i;
 }
@@ -467,6 +475,8 @@ __imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_
 	if (!pread)
 		fdesc->offset += count;
 
+	clock_gettime(CLOCK_REALTIME, &node->mtime);
+
 	return count;
 }
 
@@ -489,6 +499,7 @@ __imfs_stat(int cage_id, Node *node, struct stat *statbuf)
 {
 	if (node == NULL)
 		return -1;
+
 	*statbuf = (struct stat) {
 		.st_dev = GET_DEV,
 		.st_ino = node->index,
@@ -500,6 +511,16 @@ __imfs_stat(int cage_id, Node *node, struct stat *statbuf)
 		.st_size = node->size,
 		.st_blksize = 512,
 		.st_blocks = node->size / 512,
+#ifdef __APPLE__
+		.st_atimespec = node->atime,
+		.st_mtimespec = node->mtime,
+		.st_ctimespec = node->ctime,
+		.st_birthtimespec = node->btime,
+#else
+		.st_atim = node->atime,
+		.st_mtim = node->mtime,
+		.st_ctim = node->ctime,
+#endif
 	};
 
 	return 0;
@@ -838,6 +859,8 @@ imfs_linkat(int cage_id, int olddirfd, const char *oldpath, int newdirfd, const 
 		return -1;
 	}
 
+	clock_gettime(CLOCK_REALTIME, &newnode->ctime);
+
 	return 0;
 }
 
@@ -864,6 +887,8 @@ int
 imfs_chown(int cage_id, const char *pathname, uid_t owner, gid_t group)
 {
 	// TODO
+	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
+	clock_gettime(CLOCK_REALTIME, &node->ctime);
 	return 0;
 }
 
@@ -874,6 +899,7 @@ imfs_remove(int cage_id, const char *pathname)
 
 	if (!node) {
 		errno = ENOENT;
+		LOG("UNLINK ENOENT\n");
 		return -1;
 	}
 
@@ -1035,6 +1061,24 @@ imfs_readdir(int cage_id, I_DIR *dirstream)
 	ret->d_name[namelen + 1] = '\0';
 
 	return ret;
+}
+
+int
+imfs_mkfifo(int cage_id, const char *pathname, mode_t mode)
+{
+	return -1;
+}
+
+int
+imfs_mknod(int cage_id, const char *pathname, mode_t mode, dev_t dev)
+{
+	return -1;
+}
+
+int
+imfs_bind(int cage_id, int sockfd, const struct sockaddr *addr, socklen_t length)
+{
+	return -1;
 }
 
 //
