@@ -12,13 +12,15 @@ def tabulate(table):
     # [..., [name, counts, descs[]], ...]
 
     #for i in table:
+    if len(table[2]) == 0:
+        table[2] = ['']
     status = False 
     for desc in table[2]:
         if not status:
-            print(table[0].ljust(15) + table[1].ljust(15) + desc[:30])
+            print(table[0].ljust(15) + table[1].ljust(15) + desc)
             status = True 
         else:
-            print(''.ljust(15) + ''.ljust(15) + desc[:30])
+            print(''.ljust(15) + ''.ljust(15) + desc)
 
 
 def run_tests(directory="."):
@@ -27,23 +29,44 @@ def run_tests(directory="."):
     print("Test Name".ljust(15) + "Pass/Total".ljust(15) + "Failed Tests")
 
     for filename in sorted(os.listdir(_path)):
-        # print(filename)
-        if filename.endswith(".t"): # and os.access(_path + filename, os.X_OK):
-            # print(f"Running {filename}...")
-            ret = subprocess.run(["bash", os.path.join(_path, filename)], 
-                                  stdout = subprocess.PIPE, 
-                                  stderr= subprocess.PIPE, text=True)
-
-            passed = ret.stdout.count("ok")
-            failed = ret.stderr.count("not ok")
+        if filename.endswith(".t"):
+            fstest_proc = subprocess.Popen([FSTEST_PATH], 
+                                       stdin=subprocess.PIPE, 
+                                       stdout=subprocess.PIPE, 
+                                       stderr=subprocess.PIPE)
+            
+            time.sleep(1)
+            
             faildescs = []
 
-            for i in ret.stderr.split("not ok"):
-                if "not ok" not in i and len(i) > 0:
-                    faildescs.append(i.strip().replace('\n', ''))
+            try:
+                ret = subprocess.run(["bash", os.path.join(_path, filename)], 
+                                  stdout = subprocess.PIPE, 
+                                  stderr= subprocess.PIPE, timeout=5)
+            
+            except subprocess.TimeoutExpired as e:
+                ret = subprocess.CompletedProcess(
+                    args=e.cmd, 
+                    stdout=e.stdout, 
+                    stderr=e.stderr, 
+                    returncode=None,
+                )
+                faildescs.append("Timed out.")
+            
+            passed = str(ret.stdout).count("ok")
+            failed = str(ret.stderr).count("not ok")
+
+
+            if ret.stderr:
+                error = ret.stderr.decode()
+
+                for i in error.split("not ok"):
+                    if "not ok" not in i and len(i) > 0:
+                        faildescs.append(i.strip().replace('\n', ''))
 
             tabulate([directory + '/'+ filename, f"{passed}/{passed + failed}", faildescs])
-            # break
+
+            shutdown_fstest(fstest_proc)
 
 def shutdown_fstest(proc):
     try:
@@ -52,36 +75,18 @@ def shutdown_fstest(proc):
         print(f"Failed to send shutdown command: {e}")
 
 def main():
-    try:
-        print("Starting fstest...")
-        fstest_proc = subprocess.Popen([FSTEST_PATH], 
-                                       stdin=subprocess.PIPE, 
-                                       stdout=subprocess.PIPE, 
-                                       stderr=subprocess.PIPE)
-        
-        time.sleep(1)
+    tests = sys.argv
 
-        tests = sys.argv
+    if len(sys.argv) < 2:
+        print("No test specified")
+        exit(1)
 
-        if len(sys.argv) < 2:
-            print("No test specified")
-            exit(1)
+    print("Starting tests...")
+    for test in tests[1:]:
+        run_tests(test)
 
-        print("Starting tests...")
-        for test in tests[1:]:
-            run_tests(test)
+    time.sleep(1) 
 
-        print("Shutting down fstest...")
-        # shutdown_fstest()
-
-        time.sleep(1) 
-        fstest_proc.send_signal(signal.SIGINT)
-        fstest_proc.wait()
-    except KeyboardInterrupt:
-        print("STDOUT!")
-        print(fstest_proc.stdout)
-        print("STDERR!")
-        print(fstest_proc.stderr)
 
 if __name__ == "__main__":
     main()

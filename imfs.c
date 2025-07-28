@@ -177,7 +177,7 @@ imfs_create_node(const char *name, NodeType type, mode_t mode)
 	clock_gettime(CLOCK_REALTIME, &node->ctime);
 	clock_gettime(CLOCK_REALTIME, &node->mtime);
 
-	str_ncopy(node->name, name, MAX_NODE_NAME - 1);
+	str_ncopy(node->name, name, MAX_NODE_NAME);
 	node->name[MAX_NODE_NAME - 1] = '\0';
 	return node;
 }
@@ -334,7 +334,7 @@ add_child(Node *parent, Node *node)
 
 	parent->d_children = new_children;
 
-	str_ncopy(parent->d_children[parent->d_count].name, node->name, MAX_NODE_NAME - 1);
+	str_ncopy(parent->d_children[parent->d_count].name, node->name, MAX_NODE_NAME);
 	parent->d_count = new_count;
 	node->parent = parent;
 
@@ -358,7 +358,7 @@ imfs_remove_file(Node *node)
 static int
 imfs_remove_dir(Node *node)
 {
-	if (node == g_root_node || node->d_children > 0) {
+	if (node == g_root_node || node->d_count > 2) {
 		errno = EBUSY;
 		return -1;
 	}
@@ -594,6 +594,22 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 		return -1;
 	}
 
+	int count;
+	char namecomp[MAX_DEPTH][MAX_NODE_NAME];
+
+	split_path(path, &count, namecomp);
+
+	char *filename = namecomp[count - 1];
+
+	Node *parent_node;
+
+	parent_node = imfs_find_node_namecomp(cage_id, dirfd, namecomp, count - 1);
+
+	if (!parent_node || parent_node->type != M_DIR) {
+		errno = ENOENT;
+		return -1;
+	}
+
 	Node *node = imfs_find_node(cage_id, dirfd, path);
 
 	// New File
@@ -603,19 +619,13 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 			return -1;
 		}
 
-		int count;
-		char namecomp[MAX_DEPTH][MAX_NODE_NAME];
+		if (str_len(filename) > MAX_NODE_NAME - 1) {
+			errno = ENAMETOOLONG;
+			return -1;
+		}
 
-		split_path(path, &count, namecomp);
-
-		char *filename = namecomp[count - 1];
-
-		Node *parent_node;
-
-		parent_node = imfs_find_node_namecomp(cage_id, dirfd, namecomp, count - 1);
-
-		if (!parent_node || parent_node->type != M_DIR) {
-			errno = ENOTDIR;
+		if (str_len(filename) > 64) {
+			errno = ENAMETOOLONG;
 			return -1;
 		}
 
@@ -893,13 +903,42 @@ imfs_chown(int cage_id, const char *pathname, uid_t owner, gid_t group)
 }
 
 int
+imfs_chmod(int cage_id, const char *pathname, mode_t mode)
+{
+	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
+
+	if (!node) {
+		errno = ENOENT;
+		return -1;
+	}
+
+	node->mode = (node->mode & ~0777) | mode;
+
+	return 0;
+}
+
+int
+imfs_fchmod(int cage_id, int fd, mode_t mode)
+{
+	FileDesc *fdesc = get_filedesc(cage_id, fd);
+
+	if (!fdesc || !fdesc->node) {
+		errno = ENOENT;
+		return -1;
+	}
+
+	fdesc->node->mode = (fdesc->node->mode & ~0777) | mode;
+
+	return 0;
+}
+
+int
 imfs_remove(int cage_id, const char *pathname)
 {
 	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
 
 	if (!node) {
 		errno = ENOENT;
-		LOG("UNLINK ENOENT\n");
 		return -1;
 	}
 
@@ -999,6 +1038,10 @@ imfs_stat(int cage_id, const char *pathname, struct stat *statbuf)
 {
 	LOG("cage=%d pathname=%s\n", cage_id, pathname);
 	Node *node = imfs_find_node(cage_id, AT_FDCWD, pathname);
+	if (!node) {
+		errno = ENOENT;
+		return -1;
+	}
 	if (node->type == M_LNK)
 		return __imfs_stat(cage_id, node->l_link, statbuf);
 	return __imfs_stat(cage_id, node, statbuf);
@@ -1079,6 +1122,18 @@ int
 imfs_bind(int cage_id, int sockfd, const struct sockaddr *addr, socklen_t length)
 {
 	return -1;
+}
+
+int
+imfs_pathconf(int cage_id, const char *pathname, int name)
+{
+	return PC_CONSTS[name];
+}
+
+int
+imfs_fpathconf(int cage_id, int fd, int name)
+{
+	return PC_CONSTS[name];
 }
 
 //

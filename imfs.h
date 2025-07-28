@@ -13,7 +13,7 @@
 #define LOG(...) ((void)0)
 #endif
 
-#define MAX_NODE_NAME 64
+#define MAX_NODE_NAME 65
 #define MAX_NODE_SIZE 4096
 #define MAX_FDS		  1024
 #define MAX_NODES	  1024
@@ -25,6 +25,19 @@
 #define GET_UID 501
 #define GET_GID 20
 #define GET_DEV 1
+
+static int PC_CONSTS[] = {
+	0,
+	10,
+	10,
+	10,
+	MAX_NODE_NAME - 1,
+	MAX_DEPTH *MAX_NODE_NAME,
+	10,
+	10,
+	10,
+	10,
+};
 
 typedef enum {
 	M_REG = S_IFREG,
@@ -76,7 +89,7 @@ typedef struct Node {
 } Node;
 
 typedef struct DirEnt {
-	char name[256];
+	char name[MAX_NODE_NAME];
 	struct Node *node;
 } DirEnt;
 
@@ -134,10 +147,15 @@ int imfs_symlink(int cage_id, const char *oldpath, const char *newpath);
 int imfs_rename(int cage_id, const char *oldpath, const char *newpath);
 
 int imfs_chown(int cage_id, const char *pathname, uid_t owner, gid_t group);
+int imfs_chmod(int cage_id, const char *pathname, mode_t mode);
+int imfs_fchmod(int cage_id, int fd, mode_t mode);
 
 int imfs_mkfifo(int cage_id, const char *pathname, mode_t mode);
 int imfs_mknod(int cage_id, const char *pathname, mode_t mode, dev_t dev);
 
 int imfs_bind(int cage_id, int sockfd, const struct sockaddr *addr, socklen_t addrlen);
+
+int imfs_pathconf(int cage_id, const char *pathname, int name);
+int imfs_fpathconf(int cage_id, int fd, int name);
 
 void imfs_init();
