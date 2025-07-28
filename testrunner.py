@@ -43,7 +43,7 @@ def run_tests(directory="."):
                 ret = subprocess.run(["bash", os.path.join(_path, filename)], 
                                   stdout = subprocess.PIPE, 
                                   stderr= subprocess.PIPE, timeout=5)
-            
+        
             except subprocess.TimeoutExpired as e:
                 ret = subprocess.CompletedProcess(
                     args=e.cmd, 
