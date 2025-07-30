@@ -8,13 +8,15 @@
 #ifdef DIAG
 #include <stdio.h>
 #endif
+#include <sys/mman.h>
+
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
 #include "imfs.h"
 
-static Node g_nodes[MAX_NODES];
+static Node *g_nodes;
 
 // Each Process (Cage) has it's own FD Table, all of which are initiated
 // in memory when imfs_init() is called. Node are allocated using the use of
@@ -156,30 +158,28 @@ imfs_create_node(const char *name, NodeType type, mode_t mode)
 	else
 		node_index = g_free_list[g_free_list_size--];
 
-	Node *node = &g_nodes[node_index];
-
-	if (node->type != M_NON) {
+	if (g_nodes[node_index].type != M_NON) {
 		errno = ENOMEM;
 		return NULL;
 	}
 
-	node->in_use = 0;
-	node->type = type;
-	node->size = 0;
-	node->d_count = 0;
-	node->d_children = NULL;
-	node->r_data = NULL;
-	node->parent = NULL;
-	node->mode = node->type | (mode & 0777);
+	g_nodes[node_index].in_use = 0;
+	g_nodes[node_index].type = type;
+	g_nodes[node_index].size = 0;
+	g_nodes[node_index].d_count = 0;
+	// g_nodes[node_index].d_children = NULL;
+	g_nodes[node_index].r_data = NULL;
+	g_nodes[node_index].parent_idx = -1;
+	g_nodes[node_index].mode = g_nodes[node_index].type | (mode & 0777);
 
-	clock_gettime(CLOCK_REALTIME, &node->atime);
-	clock_gettime(CLOCK_REALTIME, &node->btime);
-	clock_gettime(CLOCK_REALTIME, &node->ctime);
-	clock_gettime(CLOCK_REALTIME, &node->mtime);
+	clock_gettime(CLOCK_REALTIME, &g_nodes[node_index].atime);
+	clock_gettime(CLOCK_REALTIME, &g_nodes[node_index].btime);
+	clock_gettime(CLOCK_REALTIME, &g_nodes[node_index].ctime);
+	clock_gettime(CLOCK_REALTIME, &g_nodes[node_index].mtime);
 
-	str_ncopy(node->name, name, MAX_NODE_NAME);
-	node->name[MAX_NODE_NAME - 1] = '\0';
-	return node;
+	str_ncopy(g_nodes[node_index].name, name, MAX_NODE_NAME);
+	g_nodes[node_index].name[MAX_NODE_NAME - 1] = '\0';
+	return &g_nodes[node_index];
 }
 
 static int
@@ -325,18 +325,15 @@ add_child(Node *parent, Node *node)
 		return -1;
 
 	size_t new_count = parent->d_count + 1;
-	DirEnt *new_children = realloc(parent->d_children, new_count * sizeof(DirEnt));
+	// DirEnt *new_children = realloc(parent->d_children, new_count * sizeof(DirEnt));
 
-	if (!new_children)
-		return -1;
+	parent->d_children[parent->d_count].node = node;
 
-	new_children[parent->d_count].node = node;
-
-	parent->d_children = new_children;
+	// parent->d_children = new_children;
 
 	str_ncopy(parent->d_children[parent->d_count].name, node->name, MAX_NODE_NAME);
 	parent->d_count = new_count;
-	node->parent = parent;
+	node->parent_idx = parent->index;
 
 	return 0;
 }
@@ -344,7 +341,8 @@ add_child(Node *parent, Node *node)
 static int
 imfs_remove_file(Node *node)
 {
-	node->parent->d_count--;
+	g_nodes[node->parent_idx].d_count--;
+
 	node->doomed = 1;
 
 	if (!node->in_use) {
@@ -368,7 +366,7 @@ imfs_remove_dir(Node *node)
 		node->type = M_NON;
 	}
 
-	node->parent->d_count--;
+	g_nodes[node->parent_idx].d_count--;
 	node->doomed = 1;
 	return 0;
 }
@@ -382,7 +380,7 @@ imfs_remove_link(Node *node)
 	}
 
 	node->doomed = 1;
-	node->parent->d_count--;
+	g_nodes[node->parent_idx].d_count--;
 	return 0;
 }
 
@@ -538,6 +536,7 @@ imfs_init(void)
 		}
 	}
 
+	g_nodes = mmap(NULL, sizeof(Node) * MAX_NODES, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	for (int i = 0; i < MAX_NODES; i++) {
 		g_nodes[i] = (Node) {
 			.type = M_NON,
@@ -558,23 +557,25 @@ imfs_init(void)
 		g_next_fd[i] = 3;
 	}
 
-	g_root_node = imfs_create_node("/", M_DIR, 0755);
-	g_root_node->parent = g_root_node;
+	Node *root_node = imfs_create_node("/", M_DIR, 0755);
+	root_node->parent_idx = root_node->index;
 
 	Node *dot = imfs_create_node(".", M_LNK, 0);
 	if (!dot)
 		exit(1);
-	dot->l_link = g_root_node;
+	dot->l_link = root_node;
 
 	Node *dotdot = imfs_create_node("..", M_LNK, 0);
 	if (!dotdot)
 		exit(1);
 
-	if (add_child(g_root_node, dot) != 0)
+	if (add_child(root_node, dot) != 0)
 		exit(1);
-	if (add_child(g_root_node, dotdot) != 0)
+	if (add_child(root_node, dotdot) != 0)
 		exit(1);
-	dotdot->l_link = g_root_node;
+	dotdot->l_link = root_node;
+
+	g_root_node = &g_nodes[0];
 }
 
 //
@@ -818,7 +819,7 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 	if (add_child(node, dotdot) != 0)
 		return -1;
 
-	dotdot->l_link = node->parent;
+	dotdot->l_link = &g_nodes[node->parent_idx];
 
 	LOG("Created Node: \n");
 	LOG("Index: %d \n", node->index);

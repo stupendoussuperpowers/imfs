@@ -52,14 +52,20 @@ typedef enum {
 #define l_link	   info.lnk.link
 #define r_data	   info.reg.data
 
+typedef struct DirEnt {
+	char name[MAX_NODE_NAME];
+	struct Node *node;
+} DirEnt;
+
 typedef struct Node {
 	NodeType type;
 	int index;	 /* Index in the global g_nodes */
 	size_t size; /* Size for offset related calls. */
 
 	char name[MAX_NODE_NAME]; /* File name */
-	struct Node *parent;	  /* Parent node */
-	int in_use;				  /* Number of FD's attached to this node */
+	// struct Node *parent;	  /* Parent node */
+	int parent_idx;
+	int in_use; /* Number of FD's attached to this node */
 	int doomed;
 	mode_t mode;
 
@@ -81,18 +87,12 @@ typedef struct Node {
 
 		// M_DIR
 		struct {
-			struct DirEnt *children; /* Directory contents. */
-			size_t count;			 /* len(children) including . and .. */
+			struct DirEnt children[100]; /* Directory contents. */
+			size_t count;				 /* len(children) including . and .. */
 		} dir;
 	} info;
 
 } Node;
-
-typedef struct DirEnt {
-	char name[MAX_NODE_NAME];
-	struct Node *node;
-} DirEnt;
-
 typedef struct FileDesc {
 	int stat;
 	struct FileDesc *link;
