@@ -1126,6 +1126,13 @@ imfs_readdir(int cage_id, I_DIR *dirstream)
 }
 
 int
+imfs_pipe(int cage_id, int pipefd[2])
+{
+	errno = EOPNOTSUPP;
+	return -1;
+}
+
+int
 imfs_mkfifo(int cage_id, const char *pathname, mode_t mode)
 {
 	errno = EOPNOTSUPP;

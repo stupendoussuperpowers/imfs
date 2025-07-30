@@ -43,6 +43,7 @@ typedef enum {
 	M_REG = S_IFREG,
 	M_DIR = S_IFDIR,
 	M_LNK = S_IFLNK,
+	M_PIP,
 	// Indicated free node
 	M_NON = 0,
 } NodeType;
@@ -94,7 +95,7 @@ typedef struct Node {
 
 } Node;
 typedef struct FileDesc {
-	int stat;
+	int status;
 	struct FileDesc *link;
 	Node *node;
 	int offset; /* How many bytes have been read. */
@@ -110,6 +111,12 @@ typedef struct I_DIR {
 	size_t offset;
 	off_t filepos;
 } I_DIR;
+
+typedef struct Pipe {
+	FileDesc readfd;
+	FileDesc writefd;
+	off_t offset;
+} Pipe;
 
 int imfs_open(int cage_id, const char *path, int flags, mode_t mode);
 int imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode);
@@ -157,5 +164,8 @@ int imfs_bind(int cage_id, int sockfd, const struct sockaddr *addr, socklen_t ad
 
 int imfs_pathconf(int cage_id, const char *pathname, int name);
 int imfs_fpathconf(int cage_id, int fd, int name);
+
+int pipe(int cage_id, int pipefd[2]);
+int pipe2(int cage_id, int pipefd[2], int flags);
 
 void imfs_init();
