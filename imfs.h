@@ -87,8 +87,8 @@ typedef struct Node {
 
 		// M_DIR
 		struct {
-			struct DirEnt children[100]; /* Directory contents. */
-			size_t count;				 /* len(children) including . and .. */
+			struct DirEnt children[MAX_NODES]; /* Directory contents. */
+			size_t count;					   /* len(children) including . and .. */
 		} dir;
 	} info;
 

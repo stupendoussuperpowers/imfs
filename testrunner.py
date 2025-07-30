@@ -15,18 +15,18 @@ def tabulate(table):
     if len(table[2]) == 0:
         table[2] = ['']
     status = False 
-    for desc in table[2]:
+    for desc in table[-1]:
         if not status:
-            print(table[0].ljust(15) + table[1].ljust(15) + desc)
+            print(table[0].ljust(15) + table[1].ljust(15) + table[2].ljust(15) + desc)
             status = True 
         else:
-            print(''.ljust(15) + ''.ljust(15) + desc)
+            print(''.ljust(15) + ''.ljust(15) + ''.ljust(15) + desc)
 
 
 def run_tests(directory="."):
     _path = "./pjdfstest/tests/" + directory
 
-    print("Test Name".ljust(15) + "Pass/Total".ljust(15) + "Failed Tests")
+    print("Test Name".ljust(15) + "Pass/Total".ljust(15) + "Skipped".ljust(15) + "Failed Tests")
 
     for filename in sorted(os.listdir(_path)):
         if filename.endswith(".t"):
@@ -55,16 +55,17 @@ def run_tests(directory="."):
             
             passed = str(ret.stdout).count("ok")
             failed = str(ret.stderr).count("not ok")
-
+            skipped = str(ret.stderr).count("EOPNOTSUPP")
+            failed -= skipped
 
             if ret.stderr:
                 error = ret.stderr.decode()
 
                 for i in error.split("not ok"):
-                    if "not ok" not in i and len(i) > 0:
+                    if "not ok" not in i and len(i) > 0 and "EOPNOTSUPP" not in i:
                         faildescs.append(i.strip().replace('\n', ''))
 
-            tabulate([directory + '/'+ filename, f"{passed}/{passed + failed}", faildescs])
+            tabulate([directory + '/'+ filename, f"{passed}/{passed + failed}", f"{skipped}", faildescs])
 
             shutdown_fstest(fstest_proc)
 

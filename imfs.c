@@ -16,7 +16,21 @@
 
 #include "imfs.h"
 
-static Node *g_nodes;
+struct IMFState {
+	Node nodes[1024];
+	int next_node;
+	int free_list[MAX_NODES];
+	int free_list_size;
+};
+
+static struct IMFState *g_state;
+
+#define g_next_node		 g_state->next_node
+#define g_nodes			 g_state->nodes
+#define g_free_list		 g_state->free_list
+#define g_free_list_size g_state->free_list_size
+
+// static Node *g_nodes;
 
 // Each Process (Cage) has it's own FD Table, all of which are initiated
 // in memory when imfs_init() is called. Node are allocated using the use of
@@ -26,9 +40,10 @@ static Node *g_nodes;
 // When creating a new node, we check which index this free list points to and creates
 // the node there. In case there are no free nodes in this list, we use the global
 // g_next_node index.
-static int g_next_node = 0;
-static int g_free_list[MAX_NODES];
-static int g_free_list_size = -1;
+
+// static int g_next_node = 0;
+// static int g_free_list[MAX_NODES];
+// static int g_free_list_size = -1;
 
 static FileDesc g_fdtable[MAX_PROCS][MAX_FDS];
 
@@ -527,6 +542,9 @@ __imfs_stat(int cage_id, Node *node, struct stat *statbuf)
 void
 imfs_init(void)
 {
+	g_state = mmap(NULL, sizeof(struct IMFState), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	g_free_list_size = -1;
+
 	for (int cage_id = 0; cage_id < MAX_PROCS; cage_id++) {
 		for (int i = 0; i < MAX_FDS; i++) {
 			g_fdtable[cage_id][i] = (FileDesc) {
@@ -536,7 +554,7 @@ imfs_init(void)
 		}
 	}
 
-	g_nodes = mmap(NULL, sizeof(Node) * MAX_NODES, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
+	// g_nodes = mmap(NULL, sizeof(Node) * MAX_NODES, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	for (int i = 0; i < MAX_NODES; i++) {
 		g_nodes[i] = (Node) {
 			.type = M_NON,
@@ -607,7 +625,7 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 	parent_node = imfs_find_node_namecomp(cage_id, dirfd, namecomp, count - 1);
 
 	if (!parent_node || parent_node->type != M_DIR) {
-		errno = ENOENT;
+		errno = ENOTDIR;
 		return -1;
 	}
 
@@ -1110,18 +1128,21 @@ imfs_readdir(int cage_id, I_DIR *dirstream)
 int
 imfs_mkfifo(int cage_id, const char *pathname, mode_t mode)
 {
+	errno = EOPNOTSUPP;
 	return -1;
 }
 
 int
 imfs_mknod(int cage_id, const char *pathname, mode_t mode, dev_t dev)
 {
+	errno = EOPNOTSUPP;
 	return -1;
 }
 
 int
 imfs_bind(int cage_id, int sockfd, const struct sockaddr *addr, socklen_t length)
 {
+	errno = EOPNOTSUPP;
 	return -1;
 }
 
