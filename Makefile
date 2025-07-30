@@ -16,6 +16,8 @@ PJD_BIN = $(TARGET)/fstest
 PJD_FST = ./pjdfstest/fstest.c 
 FST_BIN = ./pjdfstest/tests/fstestrun
 
+TESTRUNNER = ./testrunner.py
+
 $(TARGET):
 	mkdir -p $(TARGET)
 
@@ -28,17 +30,14 @@ debug: $(TARGET) $(IMFS_SRC)
 lib: $(TARGET) $(IMFS_SRC)
 	$(CC) $(FLAGS) $(CFLAGS) -DLIB -c $(IMFS_SRC) -o $(IMFS_OBJ)
 
-tests: $(TARGET) $(TEST_SRC) $(IMFS_SRC)
-	$(CC) -DLIB $(FLAGS) $(TEST_SRC) $(IMFS_SRC) -o $(TEST_BIN)
-	@$(TEST_BIN)
-
-test-%: $(TARGET) $(TEST_SRC) $(IMFS_SRC)
-	$(CC) -DLIB $(FLAGS) $(TEST_SRC) $(IMFS_SRC) -o $(TEST_BIN)
-	@$(TEST_BIN) -g "$*"
-
-pjdfstest: $(TARGET) $(PJD_SRC) $(PJD_FST) $(IMFS_SRC)
+test: $(TARGET) $(PJD_SRC) $(PJD_FST) $(IMFS_SRC)
 	$(CC) -DLIB $(IMFS_SRC) $(PJD_SRC) -o $(PJD_BIN) 
 	$(CC) $(PJD_FST) -o $(FST_BIN)
+
+test-%: $(TARGET) $(PJD_SRC) $(PJD_FST) $(IMFS_SRC)
+	$(CC) -DLIB $(IMFS_SRC) $(PJD_SRC) -o $(PJD_BIN) 
+	$(CC) $(PJD_FST) -o $(FST_BIN)
+	@$(TESTRUNNER) "$*"
 
 test: tests
 imfs: imfs
