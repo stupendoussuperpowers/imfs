@@ -26,6 +26,10 @@
 #define GET_GID 20
 #define GET_DEV 1
 
+typedef struct Node Node;
+typedef struct FileDesc FileDesc;
+typedef struct Pipe Pipe;
+
 static int PC_CONSTS[] = {
 	0,
 	10,
@@ -52,6 +56,7 @@ typedef enum {
 #define d_count	   info.dir.count
 #define l_link	   info.lnk.link
 #define r_data	   info.reg.data
+#define p_pipe	   info.pip.pipe
 
 typedef struct DirEnt {
 	char name[MAX_NODE_NAME];
@@ -91,6 +96,11 @@ typedef struct Node {
 			struct DirEnt children[MAX_NODES]; /* Directory contents. */
 			size_t count;					   /* len(children) including . and .. */
 		} dir;
+
+		// M_PIP
+		struct {
+			Pipe *pipe;
+		} pip;
 	} info;
 
 } Node;
@@ -113,8 +123,9 @@ typedef struct I_DIR {
 } I_DIR;
 
 typedef struct Pipe {
-	FileDesc readfd;
-	FileDesc writefd;
+	FileDesc *readfd;
+	FileDesc *writefd;
+	char data[1024];
 	off_t offset;
 } Pipe;
 
@@ -165,7 +176,8 @@ int imfs_bind(int cage_id, int sockfd, const struct sockaddr *addr, socklen_t ad
 int imfs_pathconf(int cage_id, const char *pathname, int name);
 int imfs_fpathconf(int cage_id, int fd, int name);
 
-int pipe(int cage_id, int pipefd[2]);
-int pipe2(int cage_id, int pipefd[2], int flags);
+int imfs_pipe(int cage_id, int pipefd[2]);
+// int pipe2(int cage_id, int pipefd[2], int flags);
 
+void imfs_copy_fd_tables(int srcfd, int dstfd);
 void imfs_init();
