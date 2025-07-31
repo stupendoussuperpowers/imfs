@@ -379,6 +379,17 @@ imfs_remove_file(Node *node)
 }
 
 static int
+imfs_remove_pipe(Node *node)
+{
+	node->doomed = 1;
+
+	g_free_list[++g_free_list_size] = node->index;
+	node->type = M_NON;
+
+	return 0;
+}
+
+static int
 imfs_remove_dir(Node *node)
 {
 	if (node == g_root_node || node->d_count > 2) {
@@ -796,6 +807,13 @@ imfs_close(int cage_id, int fd)
 	}
 
 	g_fd_free_list[cage_id][++g_fd_free_list_size[cage_id]] = fd;
+
+	// Reclaim anonymous pipe if both fd's are closed.
+	if (fdesc->node->type == M_PIP) {
+		if (!fdesc->node->p_pipe->readfd->status && !fdesc->node->p_pipe->writefd->status) {
+			imfs_remove_pipe(fdesc->node);
+		}
+	}
 
 	*fdesc = (FileDesc) {
 		.node = NULL,
