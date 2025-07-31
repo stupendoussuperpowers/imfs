@@ -1230,6 +1230,12 @@ imfs_pipe(int cage_id, int pipefd[2])
 }
 
 int
+imfs_pipe2(int cage_id, int pipefd[2], int flags)
+{
+	return imfs_pipe(cage_id, pipefd);
+}
+
+int
 imfs_mkfifo(int cage_id, const char *pathname, mode_t mode)
 {
 	errno = EOPNOTSUPP;

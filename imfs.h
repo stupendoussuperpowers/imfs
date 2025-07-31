@@ -178,7 +178,7 @@ int imfs_pathconf(int cage_id, const char *pathname, int name);
 int imfs_fpathconf(int cage_id, int fd, int name);
 
 int imfs_pipe(int cage_id, int pipefd[2]);
-// int pipe2(int cage_id, int pipefd[2], int flags);
+int pipe2(int cage_id, int pipefd[2], int flags);
 
 void imfs_copy_fd_tables(int srcfd, int dstfd);
 void imfs_init();
