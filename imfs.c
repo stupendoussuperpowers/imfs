@@ -206,7 +206,7 @@ imfs_create_node(const char *name, NodeType type, mode_t mode)
 }
 
 static int
-imfs_allocate_fd(int cage_id, Node *node)
+imfs_allocate_fd(int cage_id, Node *node, int flags)
 {
 	if (!node)
 		return -1;
@@ -228,6 +228,7 @@ imfs_allocate_fd(int cage_id, Node *node)
 		.offset = 0,
 		.link = NULL,
 		.status = 1,
+		.flags = flags,
 	};
 
 	node->in_use++;
@@ -445,6 +446,11 @@ __imfs_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t offse
 		return -1;
 	}
 
+	if (O_ACCMODE & c_fd->flags == O_WRONLY) {
+		errno = EACCES;
+		return -1;
+	}
+
 	if (offset < 0) {
 		errno = EINVAL;
 		return -1;
@@ -507,8 +513,15 @@ __imfs_pipe_write(int cage_id, int fd, const void *buf, size_t count, int pread,
 static ssize_t
 __imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_t offset)
 {
+	FileDesc *fdesc = get_filedesc(cage_id, fd);
+
 	if (fd < 0 || fd >= MAX_FDS) {
 		errno = EBADF;
+		return -1;
+	}
+
+	if (O_ACCMODE & fdesc->flags == O_RDONLY) {
+		errno = EACCES;
 		return -1;
 	}
 
@@ -516,8 +529,6 @@ __imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_
 		errno = EINVAL;
 		return -1;
 	}
-
-	FileDesc *fdesc = get_filedesc(cage_id, fd);
 
 	Node *node = fdesc->node;
 
@@ -753,7 +764,7 @@ imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
 		}
 	}
 
-	return imfs_allocate_fd(cage_id, node);
+	return imfs_allocate_fd(cage_id, node, flags);
 }
 
 int
@@ -1187,8 +1198,8 @@ int
 imfs_pipe(int cage_id, int pipefd[2])
 {
 	Node *pipenode = imfs_create_node("APIP", M_PIP, 0);
-	pipefd[0] = imfs_allocate_fd(cage_id, pipenode);
-	pipefd[1] = imfs_allocate_fd(cage_id, pipenode);
+	pipefd[0] = imfs_allocate_fd(cage_id, pipenode, O_RDONLY);
+	pipefd[1] = imfs_allocate_fd(cage_id, pipenode, O_WRONLY);
 
 	pipenode->p_pipe = mmap(NULL, sizeof(Pipe), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 

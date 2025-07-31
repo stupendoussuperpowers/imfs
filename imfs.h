@@ -106,6 +106,7 @@ typedef struct Node {
 } Node;
 typedef struct FileDesc {
 	int status;
+	int flags;
 	struct FileDesc *link;
 	Node *node;
 	int offset; /* How many bytes have been read. */
