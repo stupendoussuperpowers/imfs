@@ -424,6 +424,7 @@ __imfs_pipe_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t 
 {
 	Pipe *_pipe = get_pipe(cage_id, fd);
 
+	LOG("[pipe] [read] offset=%d status=%d\n", count, _pipe->writefd->status);
 	while (_pipe->writefd->status && _pipe->offset <= 0) {
 	};
 
@@ -497,7 +498,8 @@ __imfs_pipe_write(int cage_id, int fd, const void *buf, size_t count, int pread,
 	Pipe *_pipe = get_pipe(cage_id, fd);
 
 	mem_cpy(_pipe->data, buf, count);
-	_pipe->offset = count;
+	_pipe->offset += count;
+	LOG("[pipe] offset=%d\n", count);
 
 	return count;
 }
