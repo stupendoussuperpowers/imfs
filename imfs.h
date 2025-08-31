@@ -29,6 +29,7 @@
 typedef struct Node Node;
 typedef struct FileDesc FileDesc;
 typedef struct Pipe Pipe;
+typedef struct Chunk Chunk;
 
 static int PC_CONSTS[] = {
 	0,
@@ -56,6 +57,8 @@ typedef enum {
 #define d_count	   info.dir.count
 #define l_link	   info.lnk.link
 #define r_data	   info.reg.data
+#define r_head	   info.reg.head
+#define r_tail	   info.reg.tail
 #define p_pipe	   info.pip.pipe
 
 typedef struct DirEnt {
@@ -67,6 +70,8 @@ typedef struct Node {
 	NodeType type;
 	int index;	 /* Index in the global g_nodes */
 	size_t size; /* Size for offset related calls. */
+
+	size_t total_size;
 
 	char name[MAX_NODE_NAME]; /* File name */
 	// struct Node *parent;	  /* Parent node */
@@ -84,6 +89,8 @@ typedef struct Node {
 		// M_REG
 		struct {
 			char *data; /* File contents stored as a char array */
+			Chunk *head;
+			Chunk *tail;
 		} reg;
 
 		// M_LNK
@@ -129,6 +136,12 @@ typedef struct Pipe {
 	char data[1024];
 	off_t offset;
 } Pipe;
+
+typedef struct Chunk {
+	char data[1024];
+	size_t used;
+	Chunk *next;
+} Chunk;
 
 int imfs_open(int cage_id, const char *path, int flags, mode_t mode);
 int imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode);
@@ -179,6 +192,11 @@ int imfs_fpathconf(int cage_id, int fd, int name);
 
 int imfs_pipe(int cage_id, int pipefd[2]);
 int pipe2(int cage_id, int pipefd[2], int flags);
+
+ssize_t imfs_new_write(int cage_id, int fd, const void *buf, size_t count);
+ssize_t imfs_new_read(int cage_id, int fd, void *buf, size_t count);
+
+int imfs_fcntl(int cage_id, int fd, int op, int arg);
 
 void imfs_copy_fd_tables(int srcfd, int dstfd);
 void imfs_init();

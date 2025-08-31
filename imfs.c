@@ -5,9 +5,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <time.h>
-#ifdef DIAG
+// #ifdef DIAG
 #include <stdio.h>
-#endif
+// #endif
 #include <sys/mman.h>
 
 #include <stdlib.h>
@@ -17,18 +17,18 @@
 #include "imfs.h"
 
 struct IMFState {
-	Node nodes[1024];
-	int next_node;
-	int free_list[MAX_NODES];
-	int free_list_size;
+        Node nodes[1024];
+        int next_node;
+        int free_list[MAX_NODES];
+        int free_list_size;
 };
 
-static struct IMFState *g_state;
+static struct IMFState g_state;
 
-#define g_next_node		 g_state->next_node
-#define g_nodes			 g_state->nodes
-#define g_free_list		 g_state->free_list
-#define g_free_list_size g_state->free_list_size
+#define g_next_node              g_state.next_node
+#define g_nodes                  g_state.nodes
+#define g_free_list              g_state.free_list
+#define g_free_list_size         g_state.free_list_size
 
 // static Node *g_nodes;
 
@@ -53,6 +53,9 @@ static int g_fd_free_list[MAX_PROCS][MAX_FDS];
 static int g_fd_free_list_size[MAX_PROCS];
 
 static Node *g_root_node = NULL;
+
+// extern size_t write_host(int fd, const void buf, size_t count);
+// extern size_t read_host(int fd, void buf, size_t count);
 
 //
 // String Utils
@@ -452,6 +455,10 @@ __imfs_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t offse
 {
 	FileDesc *c_fd = get_filedesc(cage_id, fd);
 
+	if (fd >= 0 && fd <= 2) {
+		return 0; // read_host(fd, buf, count);
+	}
+
 	if (fd < 0 || fd >= MAX_FDS || !c_fd->node || !buf || offset < 0) {
 		errno = EBADF;
 		return -1;
@@ -525,6 +532,10 @@ static ssize_t
 __imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_t offset)
 {
 	FileDesc *fdesc = get_filedesc(cage_id, fd);
+
+	if (fd >= 0 && fd <= 2) {
+		return 0; // write_host(fd, buf, count);
+	}
 
 	if (fd < 0 || fd >= MAX_FDS) {
 		errno = EBADF;
@@ -621,7 +632,6 @@ __imfs_stat(int cage_id, Node *node, struct stat *statbuf)
 void
 imfs_init(void)
 {
-	g_state = mmap(NULL, sizeof(struct IMFState), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	g_free_list_size = -1;
 
 	for (int cage_id = 0; cage_id < MAX_PROCS; cage_id++) {
@@ -633,7 +643,6 @@ imfs_init(void)
 		}
 	}
 
-	// g_nodes = mmap(NULL, sizeof(Node) * MAX_NODES, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0);
 	for (int i = 0; i < MAX_NODES; i++) {
 		g_nodes[i] = (Node) {
 			.type = M_NON,
@@ -678,6 +687,114 @@ imfs_init(void)
 //
 // FS Entrypoints
 //
+
+ssize_t
+imfs_new_write(int cage_id, int fd, const void *buf, size_t count)
+{
+	FileDesc *fdesc = get_filedesc(cage_id, fd);
+	Node *node = fdesc->node;
+	int offset = fdesc->offset;
+
+	size_t written = 0;
+
+	size_t chunk_offset = 0;
+	Chunk *c = node->r_head;
+	size_t local_offset = offset;
+
+	while(c && local_offset >= 1024) {
+	     local_offset -= 1024;
+	     chunk_offset += c->used;
+	     if(!c->next) break;
+	     c = c->next;
+	}
+
+	while (written < count) {
+	     if(!c) {
+		     Chunk *new_chunk = calloc(1, sizeof(Chunk));
+		     if(!new_chunk) return -1;
+		     if(node->r_tail) node->r_tail->next = new_chunk;
+		     node->r_tail = new_chunk;
+		     if(!node->r_head) node->r_head = new_chunk;
+		     c = new_chunk;
+		}
+
+     		size_t space = 1024 - local_offset;
+     		size_t to_copy = count - written;
+    		 if(to_copy > space) to_copy = space;
+
+     		mem_cpy(c->data + local_offset, buf + written, to_copy);
+
+     		if(local_offset + to_copy > c->used)
+	     		c->used = local_offset + to_copy;
+
+     		written += to_copy;
+     		local_offset = 0;
+     		c = c->next;
+	}
+
+	node->total_size = offset + count;
+
+	fdesc->offset += written;
+
+	return written;
+}
+
+ssize_t
+imfs_new_read(int cage_id, int fd, void *buf, size_t count)
+{
+	FileDesc *fdesc = get_filedesc(cage_id, fd);
+	Node *node = fdesc->node;
+	int offset = fdesc->offset;
+
+	if(offset >= node->total_size) return 0;
+
+	if(offset + count > node->total_size)
+		count = node->total_size - offset;
+
+	size_t read = 0;
+	size_t local_offset = offset;
+	Chunk *c = node->r_head;
+
+	while (c && local_offset >= 1024) {
+		local_offset -= 1024;
+		c = c->next;
+	}
+
+	while (read < count && c) {
+		size_t available = c->used - local_offset;
+		size_t to_copy = count - read;
+		if (to_copy > available) {
+			to_copy = available;
+		}
+
+		mem_cpy(buf + read, c->data + local_offset, to_copy);
+
+		read += to_copy;
+		local_offset = 0;
+		c = c->next;
+	}
+
+	fdesc->offset += read;
+
+	return read;
+}
+
+int 
+imfs_fcntl(int cage_id, int fd, int op, int arg)
+{
+	FileDesc *fdesc = get_filedesc(cage_id, fd);
+
+	if(!fdesc) {
+		return -1;
+	}
+
+	switch(fd) {
+		case F_GETFL:
+			return fdesc->flags;
+		default:
+			return -1;
+	}
+}
 
 int
 imfs_openat(int cage_id, int dirfd, const char *path, int flags, mode_t mode)
@@ -1272,23 +1389,90 @@ imfs_fpathconf(int cage_id, int fd, int name)
 // Main func for local testing.
 //
 
+void
+load_file(char *path)
+{
+	LOG("Loading=%s\n", path);
+	char split_path[4096];
+	strcpy(split_path, path);
+
+	for (char *p = split_path + 1; *p; p++) {
+		if (*p == '/') {
+			*p = '\0';
+			int ret = imfs_mkdir(0, split_path, 0755);
+			*p = '/';
+			LOG("mkdir %s = %d\n", split_path, ret);
+		}
+	}
+
+	FILE *fp = fopen(path, "rb");
+	int imfs_fd = imfs_open(0, path, O_CREAT | O_WRONLY, 0777);
+
+	char buffer[1024];
+	size_t nread;
+	while ((nread = fread(buffer, 1, sizeof(buffer), fp)) > 0) {
+		imfs_write(0, imfs_fd, buffer, nread);
+	}
+
+	fclose(fp);
+
+	imfs_close(0, imfs_fd);
+}
+
+void
+dump_file(char *impath, char *path)
+{
+	int fd = open(path, O_CREAT | O_RDWR | O_APPEND, 0755);
+
+	int ifd = imfs_open(0, impath, O_RDONLY, 0);
+
+	char buf[20];
+	int nread;
+	while ((nread = imfs_read(0, ifd, buf, 20)) > 0) {
+		write(fd, buf, nread);
+	}
+
+	close(fd);
+	imfs_close(0, ifd);
+}
+
 #ifndef LIB
 int
 main()
 {
 	imfs_init();
 	LOG("[imfs] Init...\n");
-	int cage_id = 0;
 
-	int fd = imfs_open(cage_id, "/firstfile.txt", O_CREAT | O_WRONLY, 0666);
-	imfs_close(cage_id, fd);
+	load_file("crt1.o");
 
-	I_DIR *dirstream = imfs_opendir(cage_id, "/");
+	dump_file("crt1.o", "__crt1.o");
 
-	struct dirent *entry;
+	int ifd = imfs_open(0, "crt1.o", O_RDONLY, 0);
 
-	while ((entry = imfs_readdir(cage_id, dirstream)) != NULL) {
-		LOG("%s\n", entry->d_name);
+	unsigned char buffer[16];
+	ssize_t n;
+
+	printf("IMFS READ\n");
+	while ((n = imfs_read(0, ifd, buffer, sizeof(buffer))) > 0) {
+		for (ssize_t i = 0; i < n; i++) {
+			printf("%02x ", buffer[i]);
+		}
+		printf("\n");
+	}
+
+	printf("\n\n\n");
+
+	printf("ACTUAL READ\n");
+	int fd = open("crt1.o", O_RDONLY, 0);
+	while ((n = read(fd, buffer, sizeof(buffer))) > 0) {
+		for (ssize_t i = 0; i < n; i++) {
+			printf("%02x ", buffer[i]);
+		}
+		printf("\n");
+	}
+
+	if (n < 0) {
+		perror("read");
 	}
 
 	return 0;
