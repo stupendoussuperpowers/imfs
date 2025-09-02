@@ -727,7 +727,7 @@ preloads(const char *env)
         }
 
         fprintf(stderr, "Loading all files\n");
-        char *line = strtok(list, "\n");
+        char *line = strtok(list, ":");
 
         FILE *fp = fopen("preloads.log", "a");
 
@@ -736,7 +736,7 @@ preloads(const char *env)
 
                 struct stat st;
                 if(stat(line, &st) < 0) {
-                        line = strtok(NULL, "\n");
+                        line = strtok(NULL, ":");
                         continue;
                 }
 
@@ -745,7 +745,7 @@ preloads(const char *env)
                                 load_file(line);
                 }
                 fprintf(fp, "Loaded {%s}\n", line);
-                line = strtok(NULL, "\n");
+                line = strtok(NULL, ":");
         }
 
         fclose(fp);
