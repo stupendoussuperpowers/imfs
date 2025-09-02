@@ -714,9 +714,8 @@ dump_file(char *path, char *actual_path)
 }
 
 void
-preloads(void)
+preloads(const char *env)
 {
-        const char *env = getenv("PRELOADS");
         if(!env) {
                 fprintf(stderr, "no preloads.\n");
                 return;
