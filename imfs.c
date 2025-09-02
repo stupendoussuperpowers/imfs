@@ -5,9 +5,9 @@
 #include <dirent.h>
 #include <errno.h>
 #include <time.h>
-// #ifdef DIAG
+#ifdef DIAG
 #include <stdio.h>
-// #endif
+#endif
 #include <sys/mman.h>
 
 #include <stdlib.h>
@@ -457,7 +457,7 @@ __imfs_pipe_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t 
 {
 	Pipe *_pipe = get_pipe(cage_id, fd);
 
-	LOG("[pipe] [read] offset=%d status=%d\n", count, _pipe->writefd->status);
+	LOG("[pipe] [read] offset=%zd status=%d\n", count, _pipe->writefd->status);
 	while (_pipe->writefd->status && _pipe->offset <= 0) {
 	};
 
@@ -482,7 +482,7 @@ __imfs_read(int cage_id, int fd, void *buf, size_t count, int pread, off_t offse
 		return -1;
 	}
 
-	if (O_ACCMODE & c_fd->flags == O_WRONLY) {
+	if ((O_ACCMODE & c_fd->flags) == O_WRONLY) {
 		errno = EACCES;
 		return -1;
 	}
@@ -541,7 +541,7 @@ __imfs_pipe_write(int cage_id, int fd, const void *buf, size_t count, int pread,
 
 	mem_cpy(_pipe->data, buf, count);
 	_pipe->offset += count;
-	LOG("[pipe] offset=%d\n", count);
+	LOG("[pipe] offset=%zd\n", count);
 
 	return count;
 }
@@ -560,7 +560,7 @@ __imfs_write(int cage_id, int fd, const void *buf, size_t count, int pread, off_
 		return -1;
 	}
 
-	if (O_ACCMODE & fdesc->flags == O_RDONLY) {
+	if ((O_ACCMODE & fdesc->flags) == O_RDONLY) {
 		errno = EACCES;
 		return -1;
 	}
@@ -1139,7 +1139,15 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 		return -1;
 	}
 
-	Node *node = imfs_create_node(filename, M_DIR, mode);
+	Node *node;
+
+	node = imfs_find_node_namecomp(cage_id, fd, namecomp, count);
+	if(node) {
+		errno = EEXIST;
+		return -1;
+	}
+
+	node = imfs_create_node(filename, M_DIR, mode);
 	if (!node) {
 		return -1;
 	}
@@ -1177,7 +1185,6 @@ imfs_mkdirat(int cage_id, int fd, const char *path, mode_t mode)
 int
 imfs_mkdir(int cage_id, const char *path, mode_t mode)
 {
-	LOG("Making dir. %s | %d \n", path, mode);
 	return imfs_mkdirat(cage_id, AT_FDCWD, path, mode);
 }
 
