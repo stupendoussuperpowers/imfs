@@ -158,6 +158,24 @@ mem_cpy(void *dst, const void *src, size_t n)
 	}
 }
 
+static char *
+read_full_file(char *path, size_t *out_size)
+{
+        FILE *fp = fopen(path, "rb");
+
+        fseek(fp, 0, SEEK_END);
+        long size = ftell(fp);
+        rewind(fp);
+
+        char *buf = malloc(size);
+
+        size_t read = fread(buf, 1, size, fp);
+        fclose(fp);
+        *out_size = (size_t) size;
+
+        return buf;
+}
+
 //
 //  IMFS Utils
 //
@@ -627,6 +645,112 @@ __imfs_stat(int cage_id, Node *node, struct stat *statbuf)
 	};
 
 	return 0;
+}
+
+void
+load_file(char *path)
+{
+        FILE *fp = fopen("preloads.log", "a");
+
+        fprintf(fp, "\n[load_file] loading=%s\n", path);
+
+        char split_path[4096];
+        strcpy(split_path, path);
+
+        for(char *p = split_path + 1; *p;p++) {
+                if(*p == '/') {
+                        *p = '\0';
+                        int ret = imfs_mkdir(0, split_path, 0755);
+                        *p = '/';
+                        fprintf(fp, "[load_file] mkdir=%d\n", ret);
+                }
+        }
+
+        int imfs_fd = imfs_open(0, path, O_CREAT | O_WRONLY, 0777);
+        fprintf(fp, "[load_file] created file: %s\n", path);
+
+        size_t size;
+        char *data = read_full_file(path, &size);
+
+        imfs_write(0, imfs_fd, data, size);
+        free(data);
+
+        imfs_close(0, imfs_fd);
+}
+
+void
+dump_file(char *path, char *actual_path)
+{
+        char split_path[4096];
+        strcpy(split_path, path);
+
+        for(char *p = split_path + 1; *p;p++) {
+                if(*p == '/') {
+                        *p = '\0';
+                        int ret = mkdir(split_path, 0755);
+                        *p = '/';
+                }
+        }
+
+        int fd = open(actual_path, O_CREAT | O_WRONLY | O_APPEND, 0777);
+        int ifd = imfs_open(0, path, O_RDONLY, 0);
+
+        size_t nread;
+        char buf[1024];
+
+        while(1) {
+                char buf[1024];
+                size_t nread = imfs_new_read(0, ifd, buf, 1024);
+
+                if(nread <= 0) {
+                        break;
+                }
+
+                write(fd, buf, nread);
+        }
+
+        close(fd);
+        imfs_close(0, ifd);
+}
+
+void
+preloads(void)
+{
+        const char *env = getenv("PRELOADS");
+        if(!env) {
+                fprintf(stderr, "no preloads.\n");
+                return;
+        }
+
+        char *list = strdup(env);
+        if(!list) {
+                return;
+        }
+
+        fprintf(stderr, "Loading all files\n");
+        char *line = strtok(list, "\n");
+
+        FILE *fp = fopen("preloads.log", "a");
+
+        while(line) {
+                fprintf(fp, "Loading= %s\n", line);
+
+                struct stat st;
+                if(stat(line, &st) < 0) {
+                        line = strtok(NULL, "\n");
+                        continue;
+                }
+
+                if(strlen(line) > 0) {
+                        if (S_ISREG(st.st_mode))
+                                load_file(line);
+                }
+                fprintf(fp, "Loaded {%s}\n", line);
+                line = strtok(NULL, "\n");
+        }
+
+        fclose(fp);
+        free(list);
 }
 
 void

@@ -199,4 +199,9 @@ ssize_t imfs_new_read(int cage_id, int fd, void *buf, size_t count);
 int imfs_fcntl(int cage_id, int fd, int op, int arg);
 
 void imfs_copy_fd_tables(int srcfd, int dstfd);
+
+void preloads(void);
+void load_file(char *);
+void dump_file(char *, char *);
+
 void imfs_init();
