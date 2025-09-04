@@ -193,8 +193,8 @@ int imfs_fpathconf(int cage_id, int fd, int name);
 int imfs_pipe(int cage_id, int pipefd[2]);
 int imfs_pipe2(int cage_id, int pipefd[2], int flags);
 
-ssize_t imfs_new_write(int cage_id, int fd, const void *buf, size_t count);
-ssize_t imfs_new_read(int cage_id, int fd, void *buf, size_t count);
+//ssize_t imfs_new_write(int cage_id, int fd, const void *buf, size_t count);
+//ssize_t imfs_new_read(int cage_id, int fd, void *buf, size_t count);
 
 int imfs_fcntl(int cage_id, int fd, int op, int arg);
 
