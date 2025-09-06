@@ -31,13 +31,14 @@ typedef struct FileDesc FileDesc;
 typedef struct Pipe Pipe;
 typedef struct Chunk Chunk;
 
+// Used for pathconf(3) 
 static int PC_CONSTS[] = {
 	0,
 	10,
 	10,
 	10,
-	MAX_NODE_NAME - 1,
-	MAX_DEPTH *MAX_NODE_NAME,
+	MAX_NODE_NAME - 1, // _PC_NAME_MAX
+	MAX_DEPTH *MAX_NODE_NAME, // _PC_PATH_MAX
 	10,
 	10,
 	10,
@@ -69,9 +70,8 @@ typedef struct DirEnt {
 typedef struct Node {
 	NodeType type;
 	int index;	 /* Index in the global g_nodes */
-	size_t size; /* Size for offset related calls. */
 
-	size_t total_size;
+	size_t total_size; /* Total size of a reg file */
 
 	char name[MAX_NODE_NAME]; /* File name */
 	// struct Node *parent;	  /* Parent node */
@@ -101,7 +101,7 @@ typedef struct Node {
 		// M_DIR
 		struct {
 			struct DirEnt children[MAX_NODES]; /* Directory contents. */
-			size_t count;					   /* len(children) including . and .. */
+			size_t count; /* len(children) including . and .. */
 		} dir;
 
 		// M_PIP
@@ -109,8 +109,8 @@ typedef struct Node {
 			Pipe *pipe;
 		} pip;
 	} info;
-
 } Node;
+
 typedef struct FileDesc {
 	int status;
 	int flags;
@@ -137,6 +137,7 @@ typedef struct Pipe {
 	off_t offset;
 } Pipe;
 
+// Data for reg files is stored in Chunks of size 1024 bytes, there are connected through a linked list.
 typedef struct Chunk {
 	char data[1024];
 	size_t used;
@@ -192,9 +193,6 @@ int imfs_fpathconf(int cage_id, int fd, int name);
 
 int imfs_pipe(int cage_id, int pipefd[2]);
 int imfs_pipe2(int cage_id, int pipefd[2], int flags);
-
-//ssize_t imfs_new_write(int cage_id, int fd, const void *buf, size_t count);
-//ssize_t imfs_new_read(int cage_id, int fd, void *buf, size_t count);
 
 int imfs_fcntl(int cage_id, int fd, int op, int arg);
 
