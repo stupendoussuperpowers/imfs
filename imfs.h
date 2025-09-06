@@ -80,6 +80,9 @@ typedef struct Node {
 	int doomed;
 	mode_t mode;
 
+	uid_t owner;
+	gid_t group;
+
 	struct timespec atime;
 	struct timespec mtime;
 	struct timespec ctime;
@@ -88,9 +91,8 @@ typedef struct Node {
 	union {
 		// M_REG
 		struct {
-			char *data; /* File contents stored as a char array */
-			Chunk *head;
-			Chunk *tail;
+			Chunk *head; /* First data node */
+			Chunk *tail; /* Last data node */
 		} reg;
 
 		// M_LNK
