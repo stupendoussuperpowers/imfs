@@ -1,0 +1,21 @@
+open = {
+	IN	char*	pathname
+	N	int	flags 
+	N	mode_t	mode
+}
+
+close = {
+	N	int	fd
+}
+
+read = {
+	N	int	fd
+	OUT	void	buf[count]
+	N	int	count
+}
+
+write = {
+	N	int	fd 
+	IN	void	buf[count]
+	N	int	count
+}

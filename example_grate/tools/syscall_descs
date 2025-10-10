@@ -1,0 +1,4 @@
+open = pathname, flags, mode
+close = fd
+read = fd, buffer, count
+write = fd, buffer, count
